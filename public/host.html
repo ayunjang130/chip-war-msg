@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chip War — Host Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ============ SCREEN: SETUP ============ -->
+<section id="screen-setup" class="screen active">
+  <div class="wrap" style="max-width:480px; padding-top:64px;">
+    <p class="eyebrow">chip war · msg v2.0 · host dashboard</p>
+    <h1>Run a match</h1>
+    <p>Create a room, share the code with your players, then start the match whenever you're ready.</p>
+    <div class="card" style="margin-top:22px;">
+      <button class="btn btn-gold btn-block" id="btn-create-room">Create room</button>
+      <div class="error-text" id="setup-error"></div>
+    </div>
+    <p class="footer-note">Players join at <b>/</b> on this same server with the room code you get here.</p>
+  </div>
+</section>
+
+<!-- ============ SCREEN: LOBBY (config + roster) ============ -->
+<section id="screen-lobby" class="screen">
+  <div class="wrap" style="max-width:760px;">
+    <p class="eyebrow">room open</p>
+    <h1>Room code: <span id="lobby-roomcode" style="color:var(--gold)">—</span></h1>
+    <p>Share this code with your players. They join at this server's root address.</p>
+
+    <div class="two-col" style="margin-top:20px; align-items:start;">
+      <div class="card">
+        <h3>Companies joined (<span id="team-count">0</span> / <span id="team-max">8</span>)</h3>
+        <div id="team-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+        <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-sm" data-bot="tech">+ AI Tech-Bot</button>
+          <button class="btn btn-sm" data-bot="capacity">+ AI Capacity-Bot</button>
+          <button class="btn btn-sm" data-bot="balanced">+ AI Balanced-Bot</button>
+        </div>
+        <p class="hint-text">Bots are a prototype extra — useful for solo testing, not part of the original design doc.</p>
+      </div>
+
+      <div class="card">
+        <h3>Match configuration</h3>
+        <div class="field">
+          <label>Price weight (Wp) / Tech weight (Wt) / Capacity weight (Wc)</label>
+          <div class="two-col" style="grid-template-columns: 1fr 1fr 1fr;">
+            <input id="cfg-wp" type="number" min="0" max="1" step="0.05" value="0.5">
+            <input id="cfg-wt" type="number" min="0" max="1" step="0.05" value="0.3">
+            <input id="cfg-wc" type="number" min="0" max="1" step="0.05" value="0.2">
+          </div>
+          <div class="hint-text" id="weight-sum-hint">Sum: 1.00 (auto-normalized on save either way)</div>
+        </div>
+        <div class="field">
+          <label for="cfg-demand">Apple demand per team (units)</label>
+          <input id="cfg-demand" type="number" min="10" step="10" value="200">
+        </div>
+        <div class="field">
+          <label for="cfg-timer">Round timer (seconds)</label>
+          <input id="cfg-timer" type="number" min="30" step="10" value="180">
+        </div>
+        <div class="field">
+          <label for="cfg-maxteams">Max teams (3–8)</label>
+          <input id="cfg-maxteams" type="number" min="3" max="8" step="1" value="8">
+        </div>
+        <button class="btn btn-block" id="btn-save-config">Save configuration</button>
+        <div class="hint-text" id="config-saved-hint" style="text-align:center;"></div>
+      </div>
+    </div>
+
+    <button class="btn btn-green btn-block" id="btn-start-game" style="margin-top:18px; font-size:15px; padding:14px;">Start Round 1 (need 3+ teams)</button>
+    <div class="error-text" id="start-error" style="text-align:center;"></div>
+  </div>
+</section>
+
+<!-- ============ SCREEN: LIVE MONITOR ============ -->
+<section id="screen-live" class="screen">
+  <div class="wrap">
+    <div class="round-header">
+      <div class="block">
+        <div class="label">Round</div>
+        <div class="value"><span id="live-round">1</span> / 6</div>
+      </div>
+      <div class="block">
+        <div class="label">Time remaining</div>
+        <div class="timer" id="live-timer">3:00</div>
+      </div>
+      <div class="block">
+        <div class="label">Market price</div>
+        <div class="value">$<span id="live-mp">—</span></div>
+      </div>
+      <div class="block" style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-sm" id="btn-pause">Pause</button>
+        <button class="btn btn-sm" id="btn-resume">Resume</button>
+        <button class="btn btn-sm btn-red" id="btn-skip">Force skip →</button>
+      </div>
+    </div>
+
+    <div class="card" style="overflow-x:auto;">
+      <h3>Live team status <span class="hint-text">(host sees capital — players only see their own)</span></h3>
+      <table style="margin-top:8px;">
+        <thead><tr><th>Company</th><th>Locked</th><th>Price</th><th>Qty</th><th>Tech</th><th>Cap</th><th>Capital</th></tr></thead>
+        <tbody id="live-table-body"></tbody>
+      </table>
+    </div>
+
+    <div class="card" id="live-results-card" style="display:none;">
+      <h3>Round results</h3>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Company</th><th>Price</th><th>Sold</th><th>Revenue</th><th>Unsold</th></tr></thead>
+          <tbody id="live-results-body"></tbody>
+        </table>
+      </div>
+      <button class="btn btn-green btn-block" id="btn-next-round" style="margin-top:14px;">Start next round now</button>
+      <div class="hint-text" style="text-align:center; margin-top:6px;">Otherwise the next round starts automatically in ~20s.</div>
+    </div>
+
+    <div class="card">
+      <h3>Negotiation channel (read-only + host announcements)</h3>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chat-row">
+        <input id="chat-input" maxlength="240" placeholder="Send an announcement as HOST…">
+        <button class="btn btn-sm" id="btn-chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SCREEN: GAME OVER ============ -->
+<section id="screen-gameover" class="screen">
+  <div class="wrap" style="max-width:640px; padding-top:56px;">
+    <p class="eyebrow">final results — round 6 complete</p>
+    <h1 id="final-winner-banner">🏆 —</h1>
+    <div id="final-leaderboard" style="margin-top:22px;"></div>
+    <button class="btn btn-gold btn-block" id="btn-reset" style="margin-top:20px;">Reset room &amp; play again</button>
+  </div>
+</section>
+
+<button class="help-fab" id="btn-help-fab" title="Game rules summary">?</button>
+
+<div class="modal-overlay" id="howto-modal">
+  <div class="modal-box">
+    <button class="modal-close" id="btn-howto-close">✕</button>
+    <p class="eyebrow">rules summary for hosts</p>
+    <h2>What your players are doing</h2>
+    <p>Each team runs a chip company for 6 rounds. Consider reading this out loud (or sharing your screen) before you hit Start — first-timers won't know any of this yet.</p>
+
+    <div class="howto-step">
+      <div class="num">1</div>
+      <div class="txt"><b>Invest</b><p>Teams spend cash on Tech (helps their score this round) or Capacity (more chips to sell next round). Optional, and permanent once bought.</p></div>
+    </div>
+    <div class="howto-step">
+      <div class="num">2</div>
+      <div class="txt"><b>Price &amp; quantity, live</b><p>Everyone sees everyone else's numbers update in real time on the ticker board — that's the bluffing/negotiation part. They can change their numbers until they lock in.</p></div>
+    </div>
+    <div class="howto-step">
+      <div class="num">3</div>
+      <div class="txt"><b>Apple buys</b><p>When the timer hits zero (or everyone locks in early), Apple buys from the best-scoring sellers first — a mix of low price, high tech, high capacity — until its demand for the round runs out. Leftover chips carry over.</p></div>
+    </div>
+    <div class="howto-step">
+      <div class="num">6</div>
+      <div class="txt"><b>After Round 6</b><p>Highest total Company Value (cash + leftover chips + tech + capacity) wins. You control pacing with Pause / Resume / Force skip below.</p></div>
+    </div>
+    <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Close</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/host.js"></script>
+</body>
+</html>
