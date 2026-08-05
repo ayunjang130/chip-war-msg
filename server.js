@@ -3,6 +3,13 @@
 // Stack: Node.js + Express (static hosting) + Socket.io (real-time sync).
 // State is in-memory only, per GDD section 1 ("No external database
 // required for live gameplay matches").
+//
+// Optional env var: ANTHROPIC_API_KEY
+//   If set, each round's "market shock" (see decideRoundShock below) is
+//   generated live by Claude so the flavor text/events never repeat the
+//   same fixed pool. If unset, missing, or the API call fails/times out for
+//   any reason, the game falls back to a 14-template procedural generator
+//   instead - gameplay never blocks on or breaks from this being absent.
 
 const path = require('path');
 const http = require('http');
@@ -77,6 +84,10 @@ function createRoom(hostSocketId) {
     history: [],
     lockCounter: 0,
     lastActivityAt: Date.now(),
+    activeShock: null,
+    shockHistory: [],
+    lastResultsPayload: null,
+    finalPayload: null,
     config: {
       weights: { ...engine.CONFIG.WEIGHTS_DEFAULT },
       demandPerTeam: engine.CONFIG.DEMAND_PER_TEAM,
@@ -111,6 +122,10 @@ function publicTeam(team, viewerTeamId, isPrivileged) {
 function broadcastState(room) {
   room.lastActivityAt = Date.now();
   const teamList = Object.values(room.teams);
+  const preview =
+    room.phase === 'round_active'
+      ? engine.computeLivePreview({ teams: teamList, weights: roomWeights(room), demandPerTeam: roomDemandPerTeam(room) })
+      : {};
   teamList.forEach((viewer) => {
     if (!viewer.socketId || !viewer.connected) return;
     io.to(viewer.socketId).emit('STATE_SYNC', {
@@ -120,6 +135,8 @@ function broadcastState(room) {
       timeLeft: room.timeLeft,
       paused: room.paused,
       marketPrice: room.marketPrice,
+      shock: publicShock(room.activeShock, false),
+      preview: preview[viewer.teamId] || null,
       teams: teamList.map((t) => publicTeam(t, viewer.teamId, false))
     });
   });
@@ -131,6 +148,7 @@ function broadcastState(room) {
       timeLeft: room.timeLeft,
       paused: room.paused,
       marketPrice: room.marketPrice,
+      shock: publicShock(room.activeShock, true),
       teams: teamList.map((t) => publicTeam(t, null, true))
     });
   }
@@ -153,25 +171,138 @@ function broadcastLobby(room) {
   io.to(room.code).emit('LOBBY_UPDATE', payload);
 }
 
+// ---- Market Shocks: "오점 1" fix -------------------------------------------
+// Every round gets exactly one shock, decided in decideRoundShock(). AI is
+// tried first (if configured); engine.pickProceduralShock() is the always-
+// available fallback, so this feature can never take the game down.
+
+function publicShock(shock, detailed) {
+  if (!shock) return null;
+  const base = { title: shock.title, icon: shock.icon, description: shock.description, source: shock.source };
+  return detailed ? { ...base, effects: shock.effects } : base;
+}
+
+// Small per-room wrappers so call sites don't have to remember to pass
+// room.config.weights + room.activeShock into engine.js every time.
+function roomWeights(room) {
+  return engine.getEffectiveWeights(room.config.weights, room.activeShock);
+}
+function roomDemandPerTeam(room) {
+  return engine.getEffectiveDemandPerTeam(room.config.demandPerTeam, room.activeShock);
+}
+function roomCostMultiplier(room, kind) {
+  return engine.getCostMultiplier(room.activeShock, kind);
+}
+function roomCapacityProdMultiplier(room) {
+  return engine.getCapacityProdMultiplier(room.activeShock);
+}
+
+const SHOCK_SCHEMA_HINT = `Respond with ONLY one JSON object - no markdown fences, no commentary before or after - shaped exactly like this:
+{
+  "title": "short punchy name, max 6 words",
+  "icon": "one single emoji",
+  "description": "one sentence, under 160 characters, written for 15-18 year olds, explaining what happened and what it changes this round",
+  "effects": {
+    "capacityProductionMultiplier": number 0.5-1.5 (1 = no change; below 1 hurts teams who invested in Capacity, above 1 helps them),
+    "techUpgradeCostMultiplier": number 0.5-2.0 (1 = no change),
+    "capacityUpgradeCostMultiplier": number 0.5-2.0 (1 = no change),
+    "demandMultiplier": number 0.6-1.8 (1 = no change; scales how many chips Apple buys this round),
+    "weightBias": { "price": number 0.5-2.0, "tech": number 0.5-2.0, "capacity": number 0.5-2.0 } (1 = no change each; how much MORE that factor counts in Apple's purchase decision this round)
+  }
+}
+Omit any effect field you don't want to change. Most good shocks touch only 1-2 fields, not all five at once.`;
+
+function buildShockPrompt(room) {
+  const teams = Object.values(room.teams);
+  const avg = (fn) => (teams.length ? (teams.reduce((s, t) => s + fn(t), 0) / teams.length).toFixed(1) : '0');
+  const recent = (room.shockHistory || []).slice(-5).map((s) => s.title);
+  return `You are the "market shock" generator for a classroom economics game called Chip War. ${teams.length} teams compete to sell chips to Apple over ${engine.CONFIG.ROUNDS} rounds by setting a Price and investing in Tech level (0-5) and Capacity level (0-5).
+
+This is round ${room.round} of ${engine.CONFIG.ROUNDS}.
+Current match snapshot: average Tech level ${avg((t) => t.techLevel)}/5, average Capacity level ${avg((t) => t.capacityLevel)}/5, average price $${avg((t) => t.price || 0)}.
+Shocks used in recent rounds - invent something different from these, do not reuse them: ${recent.length ? recent.join(', ') : '(none yet)'}.
+
+Invent ONE fresh, plausible market/news event for this round (supply chains, geopolitics, Apple's shifting priorities, engineering talent, trade policy, competitor news, consumer demand, etc). Prefer surprising, specific flavor over a generic reused idea. If the snapshot above suggests most teams are leaning on one strategy (e.g. everyone maxed Capacity, or everyone priced very low), you may - but don't always have to - pick an event that makes that specific strategy riskier this round, so no single build order is safe to repeat every match.
+
+${SHOCK_SCHEMA_HINT}`;
+}
+
+async function generateAIShock(room) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        temperature: 1,
+        messages: [{ role: 'user', content: buildShockPrompt(room) }]
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const text = (data.content || [])
+      .map((block) => (block && block.type === 'text' ? block.text : ''))
+      .join('')
+      .trim();
+    return engine.parseShockResponseText(text);
+  } catch (err) {
+    return null; // network error, timeout, malformed JSON - any failure just means "no AI shock this round"
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function decideRoundShock(room) {
+  const aiShock = await generateAIShock(room).catch(() => null);
+  if (aiShock) return aiShock;
+  const recentTitles = (room.shockHistory || []).slice(-4).map((s) => s.title);
+  return engine.pickProceduralShock(recentTitles);
+}
+
 // ---- Round lifecycle -------------------------------------------------------
 
-function startRound(room) {
+async function startRound(room) {
   if (room.timerHandle) clearInterval(room.timerHandle);
   if (room.nextRoundHandle) clearTimeout(room.nextRoundHandle);
 
   room.round += 1;
-  room.phase = 'round_active';
+  room.phase = 'round_active'; // set synchronously, before any `await`, so a
+  // second trigger (e.g. a host double-click) can't re-enter this function
+  // while we're still waiting on the shock decision below.
   room.lockCounter = 0;
   room.paused = false;
 
+  // Let clients show a brief "deciding this round's market shock..." beat
+  // instead of looking frozen while decideRoundShock() may be calling out
+  // to the Anthropic API (capped at 7s, usually much faster or instant).
+  io.to(room.code).emit('ROUND_STARTING', { round: room.round });
+
+  const shock = await decideRoundShock(room);
+  room.activeShock = shock;
+  room.shockHistory = room.shockHistory || [];
+  room.shockHistory.push({ title: shock.title, round: room.round });
+  if (room.shockHistory.length > 8) room.shockHistory.shift();
+
   // Phase 1: Revenue Collection & Production (uses capacity level as it
   // stood at the END of the previous round - this round's investments only
-  // pay off in production from next round onward).
+  // pay off in production from next round onward). A capacity-hitting shock
+  // (e.g. Supply Chain Crisis) scales the per-level bonus right here.
+  const capMultiplier = roomCapacityProdMultiplier(room);
   Object.values(room.teams).forEach((team) => {
-    const production = engine.calcProduction(team.capacityLevel);
+    const production = engine.calcProduction(team.capacityLevel, capMultiplier);
     team.inventory += production;
     team.locked = false;
-    team.quantity = 0; // force an explicit decision every round
+    // Default offer = everything you have. Resetting this to 0 every round
+    // was a trap: players who only touched the Price field would silently
+    // lock in a 0-quantity offer. Defaulting to "offer it all" means doing
+    // nothing is still a real (if aggressive) strategy, not an accident.
+    team.quantity = team.inventory;
     if (!team.price) team.price = room.marketPrice > 0 ? room.marketPrice : 50;
   });
 
@@ -179,7 +310,8 @@ function startRound(room) {
   io.to(room.code).emit('ROUND_START', {
     round: room.round,
     totalRounds: engine.CONFIG.ROUNDS,
-    timeLeft: room.timeLeft
+    timeLeft: room.timeLeft,
+    shock: publicShock(room.activeShock, false)
   });
   broadcastState(room);
   scheduleBots(room);
@@ -288,8 +420,8 @@ function resolveRound(room) {
 
   const results = engine.resolveApplePurchase({
     teams: entries,
-    weights: room.config.weights,
-    demandPerTeam: room.config.demandPerTeam
+    weights: roomWeights(room),
+    demandPerTeam: roomDemandPerTeam(room)
   });
   const newMP = engine.calcMarketPrice(results, room.marketPrice);
 
@@ -324,9 +456,11 @@ function resolveRound(room) {
     totalRounds: engine.CONFIG.ROUNDS,
     marketPrice: newMP,
     results: resultRows,
-    isFinalRound: room.round >= engine.CONFIG.ROUNDS
+    isFinalRound: room.round >= engine.CONFIG.ROUNDS,
+    shock: publicShock(room.activeShock, false)
   };
   room.history.push(payload);
+  room.lastResultsPayload = payload; // so a reconnecting client can be caught up
   io.to(room.code).emit('ROUND_RESULT', payload);
   broadcastState(room);
 
@@ -353,7 +487,9 @@ function endGame(room) {
       companyValue: Math.round(engine.calcCompanyValue(t))
     }))
     .sort((a, b) => b.companyValue - a.companyValue);
-  io.to(room.code).emit('GAME_OVER', { leaderboard: teams, winner: teams[0] || null });
+  const payload = { leaderboard: teams, winner: teams[0] || null };
+  room.finalPayload = payload;
+  io.to(room.code).emit('GAME_OVER', payload);
 }
 
 function resetRoom(room) {
@@ -366,6 +502,10 @@ function resetRoom(room) {
   room.marketPrice = 0;
   room.history = [];
   room.lockCounter = 0;
+  room.activeShock = null;
+  room.shockHistory = [];
+  room.lastResultsPayload = null;
+  room.finalPayload = null;
   Object.values(room.teams).forEach((t) => {
     t.capital = engine.CONFIG.INITIAL_CAPITAL;
     t.inventory = engine.CONFIG.INITIAL_INVENTORY;
@@ -389,7 +529,7 @@ io.on('connection', (socket) => {
     const room = createRoom(socket.id);
     socket.join(room.code);
     socketMeta[socket.id] = { roomCode: room.code, role: 'host' };
-    if (typeof cb === 'function') cb({ ok: true, roomCode: room.code, config: room.config });
+    if (typeof cb === 'function') cb({ ok: true, roomCode: room.code, config: room.config, aiEnabled: !!process.env.ANTHROPIC_API_KEY });
   });
 
   // Lets a host reconnect (e.g. page refresh) without losing the room.
@@ -399,9 +539,14 @@ io.on('connection', (socket) => {
     room.hostSocketId = socket.id;
     socket.join(room.code);
     socketMeta[socket.id] = { roomCode, role: 'host' };
-    cb && cb({ ok: true, roomCode: room.code, config: room.config });
+    cb && cb({ ok: true, roomCode: room.code, config: room.config, aiEnabled: !!process.env.ANTHROPIC_API_KEY });
     broadcastLobby(room);
     broadcastState(room);
+    if (room.phase === 'round_results' && room.lastResultsPayload) {
+      io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
+    } else if (room.phase === 'game_over' && room.finalPayload) {
+      io.to(socket.id).emit('GAME_OVER', room.finalPayload);
+    }
   });
 
   socket.on('JOIN_ROOM', ({ roomCode, teamName, companyName, teamId }, cb) => {
@@ -435,6 +580,15 @@ io.on('connection', (socket) => {
     cb && cb({ ok: true, teamId: team.teamId, roomCode });
     broadcastLobby(room);
     broadcastState(room);
+    // Catch up a (re)joining client on whatever already happened - without
+    // this, reconnecting mid/after a round showed an empty results/game-over
+    // screen, because those screens only ever populate from their one-shot
+    // ROUND_RESULT/GAME_OVER events, which a fresh STATE_SYNC doesn't resend.
+    if (room.phase === 'round_results' && room.lastResultsPayload) {
+      io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
+    } else if (room.phase === 'game_over' && room.finalPayload) {
+      io.to(socket.id).emit('GAME_OVER', room.finalPayload);
+    }
   });
 
   // Live typed price/quantity - broadcast immediately so opponents can see
@@ -463,11 +617,13 @@ io.on('connection', (socket) => {
     // Debt & Comeback Handling: negative capital from aggressive investment
     // is explicitly allowed, so the only gate here is the level cap.
     if (kind === 'tech' && team.techLevel < engine.CONFIG.TECH_MAX) {
+      const cost = Math.round(engine.CONFIG.TECH_UPGRADE_COST * roomCostMultiplier(room, 'tech'));
       team.techLevel += 1;
-      team.capital -= engine.CONFIG.TECH_UPGRADE_COST;
+      team.capital -= cost;
     } else if (kind === 'capacity' && team.capacityLevel < engine.CONFIG.CAPACITY_MAX) {
+      const cost = Math.round(engine.CONFIG.CAPACITY_UPGRADE_COST * roomCostMultiplier(room, 'capacity'));
       team.capacityLevel += 1;
-      team.capital -= engine.CONFIG.CAPACITY_UPGRADE_COST;
+      team.capital -= cost;
     }
     broadcastState(room);
   });

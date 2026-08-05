@@ -30,6 +30,7 @@
     <p class="eyebrow">room open</p>
     <h1>Room code: <span id="lobby-roomcode" style="color:var(--gold)">—</span></h1>
     <p>Share this code with your players. They join at this server's root address.</p>
+    <p class="pill" id="ai-shock-status" style="margin-top:8px;">—</p>
 
     <div class="two-col" style="margin-top:20px; align-items:start;">
       <div class="card">
@@ -99,6 +100,16 @@
       </div>
     </div>
 
+        <div class="shock-loading" id="shock-loading" style="display:none;"><span class="spin"></span> Deciding this round's market shock…</div>
+    <div class="shock-banner" id="shock-banner" style="display:none;">
+      <div class="icon" id="shock-icon">⚡</div>
+      <div>
+        <div class="title" id="shock-title">—</div>
+        <div class="desc" id="shock-desc">—</div>
+        <div class="hint-text" id="shock-effects" style="margin-top:4px;"></div>
+      </div>
+    </div>
+
     <div class="card" style="overflow-x:auto;">
       <h3>Live team status <span class="hint-text">(host sees capital — players only see their own)</span></h3>
       <table style="margin-top:8px;">
@@ -165,6 +176,7 @@
       <div class="num">6</div>
       <div class="txt"><b>After Round 6</b><p>Highest total Company Value (cash + leftover chips + tech + capacity) wins. You control pacing with Pause / Resume / Force skip below.</p></div>
     </div>
+    <div class="howto-formula">⚡ Every round also rolls one random <b style="color:var(--ink)">Market Shock</b> (shown at the top of this screen with exact numbers) that temporarily changes the rules — e.g. Capacity efficiency down, or Apple weighing Tech higher. It's what stops the same build order from winning every single match. Players see the flavor text; you see the numbers behind it too.</div>
     <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Close</button>
   </div>
 </div>

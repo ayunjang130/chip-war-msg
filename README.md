@@ -54,13 +54,57 @@ for 30+ minutes, so long-running public deployments don't leak memory.
       Market Price, division-by-zero guards, Company Value
 - [x] Debt allowed (negative capital from investment or poor sales)
 - [x] Room codes, lobby, host dashboard (config, pause/resume/force-skip,
-      kick, reset), reconnection by teamId
+      kick, reset), reconnection by teamId (including mid-results/game-over)
 - [x] Live "visible bluffing" ticker + negotiation chat channel
 - [x] Hidden info: capital is only visible to its own team + the host
 - [x] Beginner onboarding: "How to Play" modal (auto-shown once, reopenable
       via the `?` button) + inline plain-language hints on every control
 - [x] Optional AI bots (Tech/Capacity/Balanced) for solo/small-group testing
       — a prototype convenience, not in the original design doc
+- [x] **Market Shocks** — one random modifier per round (see below)
+- [x] **Live purchase-rank preview** — real-time 🟢/🟡/🔴 badge under the
+      price box, computed with pure math (no AI, no delay)
+
+## Market Shocks (anti-meta-lock system)
+
+Every round rolls exactly one shock that temporarily changes a rule for
+that round only — e.g. "Capacity efficiency -40%" or "Apple weighs Tech 2x
+this round." It's built in two layers:
+
+1. **Procedural (always on, free, instant)** — 14 hand-written templates in
+   `engine.js` (`getShockTemplates`), each with a randomized magnitude
+   rolled fresh every time it's picked, and repeat-avoidance against the
+   last 4 rounds' titles. This alone gives real variety with zero setup.
+2. **AI (optional, richer)** — if `ANTHROPIC_API_KEY` is set, each round
+   `server.js` asks Claude (Haiku) to invent a fresh, situation-aware shock
+   instead — it's given the match's current average Tech/Capacity/price and
+   a list of recently-used titles, so it can react to whatever strategy is
+   dominating instead of repeating a fixed pool.
+
+Every shock, from either source, is passed through
+`engine.sanitizeShock()`, which clamps every numeric effect into a safe
+range no matter what it received. If the API key is missing, the call
+fails, times out (7s cap), or returns something unparseable, the game
+silently falls back to the procedural layer — nothing ever blocks or
+crashes on this.
+
+**To turn on AI shocks:** get a key at console.anthropic.com (separate,
+pay-as-you-go billing from a claude.ai subscription), then add it as an
+environment variable named `ANTHROPIC_API_KEY` in your host's dashboard
+(Render: your service → **Environment** tab → **Add Environment Variable**).
+Cost is small per call (a short Haiku request each round) but real. The
+lobby screen on `/host` shows whether it's currently active.
+
+## Live purchase-rank preview
+
+Deliberately **not** AI — it's `engine.computeLivePreview()`, which re-runs
+the exact same `resolveApplePurchase()` used for the real result, on
+whatever prices/quantities are currently visible (including everyone's
+still-being-typed numbers, since those are already public via the ticker).
+It updates on every keystroke with zero network latency and is guaranteed
+to match what the real end-of-round resolution will do, because both call
+sites share the same effective-weights/effective-demand helpers that fold
+in the round's active shock.
 
 ## What to expand next
 
@@ -77,3 +121,6 @@ for 30+ minutes, so long-running public deployments don't leak memory.
 4. **Always-on hosting.** The free tier's cold-start delay is fine for
    casual use; for a scheduled big event, the ~$7/mo "always on" tier on
    most platforms removes it entirely.
+5. **Shock history recap.** The final results screen could list all 6
+   rounds' shocks in order — a nice debrief tool for a class discussion of
+   "what would you do differently."

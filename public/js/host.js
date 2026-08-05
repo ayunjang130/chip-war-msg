@@ -33,6 +33,47 @@
   $('btn-howto-close').addEventListener('click', closeHowTo);
   $('btn-howto-gotit').addEventListener('click', closeHowTo);
 
+  // ---------- AI shock status ----------
+  function renderAiStatus(aiEnabled) {
+    const el = $('ai-shock-status');
+    el.textContent = aiEnabled ? '✨ AI-generated market shocks: ON' : '🔧 Using built-in shock templates (no ANTHROPIC_API_KEY set)';
+    el.style.borderColor = aiEnabled ? 'rgba(139,124,246,0.5)' : 'var(--line)';
+    el.style.color = aiEnabled ? '#c4b5fd' : 'var(--ink-dim)';
+  }
+
+  // ---------- market shock (host sees numeric effects too) ----------
+  function showShockLoading() {
+    $('shock-loading').style.display = 'flex';
+    $('shock-banner').style.display = 'none';
+  }
+  function summarizeEffects(effects) {
+    if (!effects) return '';
+    const parts = [];
+    if (effects.capacityProductionMultiplier !== 1) parts.push(`Capacity production ×${effects.capacityProductionMultiplier}`);
+    if (effects.techUpgradeCostMultiplier !== 1) parts.push(`Tech cost ×${effects.techUpgradeCostMultiplier}`);
+    if (effects.capacityUpgradeCostMultiplier !== 1) parts.push(`Capacity cost ×${effects.capacityUpgradeCostMultiplier}`);
+    if (effects.demandMultiplier !== 1) parts.push(`Demand ×${effects.demandMultiplier}`);
+    const b = effects.weightBias || {};
+    if (b.price !== 1) parts.push(`Price weight ×${b.price}`);
+    if (b.tech !== 1) parts.push(`Tech weight ×${b.tech}`);
+    if (b.capacity !== 1) parts.push(`Capacity weight ×${b.capacity}`);
+    return parts.length ? parts.join(' · ') : 'No numeric changes this round.';
+  }
+  function renderShock(shock) {
+    $('shock-loading').style.display = 'none';
+    const el = $('shock-banner');
+    if (!shock) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'flex';
+    el.classList.toggle('ai', shock.source === 'ai');
+    $('shock-icon').textContent = shock.icon || '⚡';
+    $('shock-title').textContent = shock.title;
+    $('shock-desc').textContent = shock.description;
+    $('shock-effects').textContent = summarizeEffects(shock.effects);
+  }
+
   // ---------- setup screen ----------
   $('btn-create-room').addEventListener('click', () => {
     socket.emit('HOST_CREATE_ROOM', {}, (res) => {
@@ -40,6 +81,7 @@
       myRoomCode = res.roomCode;
       localStorage.setItem(HOST_SESSION_KEY, myRoomCode);
       $('lobby-roomcode').textContent = myRoomCode;
+      renderAiStatus(res.aiEnabled);
       routeScreen('lobby');
     });
   });
@@ -51,6 +93,7 @@
       if (res && res.ok) {
         myRoomCode = res.roomCode;
         $('lobby-roomcode').textContent = myRoomCode;
+        renderAiStatus(res.aiEnabled);
         applyConfigToInputs(res.config);
         routeScreen(lastPhase); // will be corrected by the LOBBY_UPDATE/STATE_SYNC that follows
       } else {
@@ -128,6 +171,7 @@
   function renderLiveTable(payload) {
     $('live-round').textContent = payload.round;
     $('live-mp').textContent = payload.marketPrice ? payload.marketPrice.toFixed(0) : '—';
+    renderShock(payload.shock);
     const body = $('live-table-body');
     body.innerHTML = '';
     payload.teams.forEach((t) => {
@@ -223,6 +267,10 @@
     if (!myRoomCode) return;
     renderLiveTable(payload);
     routeScreen(payload.phase);
+  });
+  socket.on('ROUND_STARTING', () => {
+    routeScreen('round_active');
+    showShockLoading();
   });
   socket.on('ROUND_START', () => routeScreen('round_active'));
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));

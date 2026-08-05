@@ -74,6 +74,15 @@
       </div>
     </div>
 
+    <div id="shock-loading" class="shock-loading" style="display:none;"><span class="spin"></span> Deciding this round's market shock…</div>
+    <div id="shock-banner" class="shock-banner" style="display:none;">
+      <div class="icon" id="shock-icon">⚡</div>
+      <div>
+        <div class="title" id="shock-title">—</div>
+        <div class="desc" id="shock-desc">—</div>
+      </div>
+    </div>
+
     <div class="ticker" id="ticker"></div>
 
     <div class="game-grid">
@@ -107,6 +116,7 @@
           </div>
           <div class="hint-text" id="inventory-hint">Available inventory: 0 units</div>
           <div class="inline-hint">💡 A lower price scores better, but Tech and Capacity matter just as much — there's no single winning move. You can watch everyone else's numbers on the board above and change yours anytime before you lock in.</div>
+          <div class="rank-preview" id="rank-preview" style="display:none;"><span class="badge-dot"></span><span id="rank-preview-text">—</span></div>
           <button class="btn btn-green btn-block" id="btn-lockin" style="margin-top:12px;">Lock In</button>
           <div class="hint-text" id="lockin-status" style="text-align:center; margin-top:8px;">Locking in freezes your price and quantity for this round — you can't undo it.</div>
         </div>
@@ -138,6 +148,13 @@
     <p class="eyebrow">round results</p>
     <h1>Round <span id="res-round">1</span> is in the books</h1>
     <p>New Market Price: $<b id="res-mp" style="color:var(--ink)">—</b></p>
+    <div class="shock-banner" id="res-shock-banner" style="display:none;">
+      <div class="icon" id="res-shock-icon">⚡</div>
+      <div>
+        <div class="title" id="res-shock-title">—</div>
+        <div class="desc" id="res-shock-desc">This round's market shock.</div>
+      </div>
+    </div>
     <p class="inline-hint">Apple bought from the highest-scoring sellers first (best mix of low price + high tech + high capacity) until it ran out of demand for the round. Anything unsold rolls over to next round.</p>
     <div class="card" style="margin-top:18px; overflow-x:auto;">
       <table>
@@ -175,7 +192,7 @@
     </div>
     <div class="howto-step">
       <div class="num">2</div>
-      <div class="txt"><b>Set your price &amp; quantity</b><p>Pick how much to charge and how many chips to offer. You can see everyone else's live numbers on the ticker board — and they can see yours. Change your mind as many times as you want.</p></div>
+      <div class="txt"><b>Set your price &amp; quantity</b><p>Pick how much to charge and how many chips to offer. You can see everyone else's live numbers on the ticker board — and they can see yours. A small badge under the price box shows your predicted rank in real time (🟢 safe, 🟡 partial sale, 🔴 risk) so you're never guessing. Change your mind as many times as you want.</p></div>
     </div>
     <div class="howto-step">
       <div class="num">3</div>
@@ -185,6 +202,8 @@
       <div class="num">6</div>
       <div class="txt"><b>After Round 6</b><p>Whoever has the highest total Company Value (cash + leftover chips + tech + capacity, all counted as money) wins the match.</p></div>
     </div>
+
+    <div class="howto-formula">⚡ Each round also gets one random <b style="color:var(--ink)">Market Shock</b> shown at the top of the screen (e.g. "Capacity efficiency -40%" or "Apple values Tech 2x this round"). It changes the rules just for that round, so the exact same strategy won't win every match.</div>
 
     <div class="howto-formula">Tip: cheap pricing alone won't win — a rival with better Tech or Capacity can out-score you even at a higher price. There's no single best strategy.</div>
     <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Got it, let's play</button>

@@ -45,10 +45,17 @@ function normalizeWeights(w) {
   return { price: price / sum, tech: tech / sum, capacity: capacity / sum };
 }
 
-/** Production = BaseProduction + (CapacityLevel x ProductionPerLevel) */
-function calcProduction(capacityLevel) {
+/**
+ * Production = BaseProduction + (CapacityLevel x ProductionPerLevel x multiplier)
+ * multiplier defaults to 1 (no shock). Only the per-level BONUS is scaled -
+ * the base floor everyone gets for free is never touched by a shock, so a
+ * "Supply Chain Crisis" punishes capacity investment specifically instead
+ * of punishing every team equally regardless of strategy.
+ */
+function calcProduction(capacityLevel, multiplier = 1) {
   const c = Math.max(0, Math.min(capacityLevel, CONFIG.CAPACITY_MAX));
-  return CONFIG.BASE_PRODUCTION + c * CONFIG.PRODUCTION_PER_LEVEL;
+  const m = Number.isFinite(multiplier) ? multiplier : 1;
+  return Math.round(CONFIG.BASE_PRODUCTION + c * CONFIG.PRODUCTION_PER_LEVEL * m);
 }
 
 /** Qt = Qbase + (Ti/Tmax) x (100-Qbase); with Qbase=0 this is (Ti/5)*100 */
@@ -146,6 +153,284 @@ function calcCompanyValue(team) {
   );
 }
 
+/* ============================================================================
+ * MARKET SHOCKS ("오점 1" fix) - a per-round modifier that stops every match
+ * from converging on the same "max invest early, dump late" build order.
+ *
+ * A shock is: { title, icon, description, effects, source }
+ * effects is always the same shape regardless of where the shock came from
+ * (hand-written template below, or an AI-generated one in server.js), which
+ * is what lets sanitizeShock() validate AI output with the exact same rules
+ * a template already has to satisfy:
+ *   capacityProductionMultiplier  0.4 - 1.6   (hits pure-Capacity rush builds)
+ *   techUpgradeCostMultiplier     0.5 - 2.0
+ *   capacityUpgradeCostMultiplier 0.5 - 2.0
+ *   demandMultiplier              0.6 - 1.8
+ *   weightBias { price, tech, capacity }  0.4 - 2.5 each (hits pure-price
+ *     dumping builds when price gets biased down, or tech/capacity up)
+ * ==========================================================================*/
+
+const NEUTRAL_SHOCK = Object.freeze({
+  title: 'Calm Market',
+  icon: '🌤️',
+  description: 'No major disruptions this round — standard rules apply.',
+  effects: Object.freeze({
+    capacityProductionMultiplier: 1,
+    techUpgradeCostMultiplier: 1,
+    capacityUpgradeCostMultiplier: 1,
+    demandMultiplier: 1,
+    weightBias: Object.freeze({ price: 1, tech: 1, capacity: 1 })
+  }),
+  source: 'neutral'
+});
+
+function roll(min, max) {
+  return Math.round((min + Math.random() * (max - min)) * 100) / 100;
+}
+function pct(multiplier) {
+  return Math.round(Math.abs(1 - multiplier) * 100);
+}
+
+// 13 dramatic templates + Calm Market (weighted heavier so chaos isn't
+// constant). Magnitudes re-roll every time a template is picked, so even a
+// template repeating later in a long match reads a little differently.
+function getShockTemplates() {
+  return [
+    {
+      id: 'supply_crisis',
+      title: 'Supply Chain Crisis',
+      icon: '⚠️',
+      build() {
+        const m = roll(0.45, 0.75);
+        return { effects: { capacityProductionMultiplier: m }, description: `A component shortage cuts everyone's Capacity efficiency by ${pct(m)}% this round.` };
+      }
+    },
+    {
+      id: 'capacity_boom',
+      title: 'Logistics Breakthrough',
+      icon: '⚙️',
+      build() {
+        const m = roll(1.15, 1.45);
+        return { effects: { capacityProductionMultiplier: m }, description: `A new shipping route boosts Capacity efficiency by ${pct(m)}% this round.` };
+      }
+    },
+    {
+      id: 'apple_quality_push',
+      title: "Apple's Quality Push",
+      icon: '🍎',
+      build() {
+        const m = roll(1.5, 2.3);
+        return { effects: { weightBias: { tech: m } }, description: `Apple is prioritizing quality this round — Tech scores count for noticeably more.` };
+      }
+    },
+    {
+      id: 'apple_value_push',
+      title: "Apple's Value Push",
+      icon: '💵',
+      build() {
+        const m = roll(1.4, 2.0);
+        return { effects: { weightBias: { price: m } }, description: `Apple is watching every dollar this round — Price matters more than usual.` };
+      }
+    },
+    {
+      id: 'reliability_focus',
+      title: 'Reliability Focus',
+      icon: '🔧',
+      build() {
+        const m = roll(1.5, 2.2);
+        return { effects: { weightBias: { capacity: m } }, description: `Apple wants proof you can deliver at scale — Capacity counts for more this round.` };
+      }
+    },
+    {
+      id: 'chip_glut',
+      title: 'Chip Glut',
+      icon: '📦',
+      build() {
+        const m = roll(0.55, 0.75);
+        return { effects: { demandMultiplier: m }, description: `Apple trimmed its forecast — total demand is down ${pct(m)}% this round.` };
+      }
+    },
+    {
+      id: 'emergency_restock',
+      title: 'Emergency Restock',
+      icon: '🚨',
+      build() {
+        const m = roll(1.3, 1.75);
+        return { effects: { demandMultiplier: m }, description: `A surprise product launch means Apple needs ${pct(m)}% more chips this round.` };
+      }
+    },
+    {
+      id: 'talent_war',
+      title: 'Talent War',
+      icon: '🧠',
+      build() {
+        const m = roll(1.4, 1.9);
+        return { effects: { techUpgradeCostMultiplier: m }, description: `Engineers are hard to hire right now — Tech upgrades cost ${pct(m)}% more this round.` };
+      }
+    },
+    {
+      id: 'rd_grant',
+      title: 'R&D Grant',
+      icon: '🎓',
+      build() {
+        const m = roll(0.5, 0.7);
+        return { effects: { techUpgradeCostMultiplier: m }, description: `A government grant cuts the cost of Tech upgrades by ${pct(m)}% this round.` };
+      }
+    },
+    {
+      id: 'factory_subsidy',
+      title: 'Factory Subsidy',
+      icon: '🏗️',
+      build() {
+        const m = roll(0.5, 0.7);
+        return { effects: { capacityUpgradeCostMultiplier: m }, description: `A regional subsidy cuts the cost of Capacity upgrades by ${pct(m)}% this round.` };
+      }
+    },
+    {
+      id: 'import_tariff',
+      title: 'Import Tariff',
+      icon: '🛃',
+      build() {
+        const m = roll(1.4, 1.9);
+        return { effects: { capacityUpgradeCostMultiplier: m }, description: `New equipment tariffs make Capacity upgrades ${pct(m)}% more expensive this round.` };
+      }
+    },
+    {
+      id: 'quality_scandal',
+      title: "Rival's Quality Scandal",
+      icon: '🔍',
+      build() {
+        const m = roll(0.5, 0.7);
+        return { effects: { weightBias: { tech: m } }, description: `A competitor's recall has buyers distracted — Tech matters a bit less this round.` };
+      }
+    },
+    {
+      id: 'budget_slack',
+      title: 'Budget Slack',
+      icon: '💰',
+      build() {
+        const m = roll(0.5, 0.7);
+        return { effects: { weightBias: { price: m } }, description: `Apple has extra budget slack this round — Price matters a bit less than usual.` };
+      }
+    },
+    { id: 'calm_market', title: NEUTRAL_SHOCK.title, icon: NEUTRAL_SHOCK.icon, weight: 4, build: () => ({ effects: {}, description: NEUTRAL_SHOCK.description }) }
+  ];
+}
+
+/** Clamp + validate a raw shock object from ANY source (template or AI JSON). */
+function sanitizeShock(raw, source) {
+  if (!raw || typeof raw !== 'object') return null;
+  const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 60) : '';
+  const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 220) : '';
+  if (!title || !description) return null;
+  const icon = typeof raw.icon === 'string' && raw.icon.trim() ? raw.icon.trim().slice(0, 4) : '⚡';
+  const e = raw.effects && typeof raw.effects === 'object' ? raw.effects : {};
+  const bias = e.weightBias && typeof e.weightBias === 'object' ? e.weightBias : {};
+  const clamp = (v, lo, hi) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : 1;
+  };
+  return {
+    title,
+    description,
+    icon,
+    effects: {
+      capacityProductionMultiplier: clamp(e.capacityProductionMultiplier, 0.4, 1.6),
+      techUpgradeCostMultiplier: clamp(e.techUpgradeCostMultiplier, 0.5, 2.0),
+      capacityUpgradeCostMultiplier: clamp(e.capacityUpgradeCostMultiplier, 0.5, 2.0),
+      demandMultiplier: clamp(e.demandMultiplier, 0.6, 1.8),
+      weightBias: {
+        price: clamp(bias.price, 0.4, 2.5),
+        tech: clamp(bias.tech, 0.4, 2.5),
+        capacity: clamp(bias.capacity, 0.4, 2.5)
+      }
+    },
+    source: source || 'procedural'
+  };
+}
+
+/** Picks a template (skipping recently-used titles where possible) and rolls it. */
+function pickProceduralShock(recentTitles) {
+  const avoid = new Set(recentTitles || []);
+  const templates = getShockTemplates();
+  let pool = [];
+  templates.forEach((t) => {
+    if (avoid.has(t.title)) return;
+    for (let i = 0; i < (t.weight || 1); i++) pool.push(t);
+  });
+  if (pool.length === 0) pool = templates; // everything was used recently - allow a repeat rather than break
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  const built = chosen.build();
+  return sanitizeShock({ title: chosen.title, icon: chosen.icon, description: built.description, effects: built.effects }, 'procedural');
+}
+
+function getEffectiveWeights(baseWeights, shock) {
+  const bias = (shock && shock.effects && shock.effects.weightBias) || { price: 1, tech: 1, capacity: 1 };
+  return normalizeWeights({
+    price: baseWeights.price * (bias.price || 1),
+    tech: baseWeights.tech * (bias.tech || 1),
+    capacity: baseWeights.capacity * (bias.capacity || 1)
+  });
+}
+function getEffectiveDemandPerTeam(baseDemand, shock) {
+  const mult = (shock && shock.effects && shock.effects.demandMultiplier) || 1;
+  return Math.max(1, Math.round(baseDemand * mult));
+}
+function getCostMultiplier(shock, kind) {
+  if (!shock || !shock.effects) return 1;
+  return kind === 'tech' ? shock.effects.techUpgradeCostMultiplier || 1 : shock.effects.capacityUpgradeCostMultiplier || 1;
+}
+function getCapacityProdMultiplier(shock) {
+  return (shock && shock.effects && shock.effects.capacityProductionMultiplier) || 1;
+}
+
+/* ============================================================================
+ * LIVE PURCHASE-RANK PREVIEW ("오점 2" fix) - pure math, no AI needed. Reuses
+ * resolveApplePurchase() as a read-only simulation: "if the round ended on
+ * these currently-visible numbers right now, who would Apple buy from?"
+ * Safe to call on every keystroke - it does not mutate anything.
+ * ==========================================================================*/
+function computeLivePreview({ teams, weights, demandPerTeam }) {
+  if (!teams || teams.length === 0) return {};
+  const entries = teams.map((t) => ({
+    teamId: t.teamId,
+    price: t.price,
+    quantity: Math.max(0, Math.min(t.quantity, t.inventory)),
+    techLevel: t.techLevel,
+    capacityLevel: t.capacityLevel,
+    lockOrder: t.lockOrder || 0
+  }));
+  const results = resolveApplePurchase({ teams: entries, weights, demandPerTeam });
+  const preview = {};
+  results.forEach((r, idx) => {
+    const offered = entries.find((e) => e.teamId === r.teamId).quantity;
+    let status = 'risk';
+    if (offered > 0 && r.purchased >= offered) status = 'safe';
+    else if (r.purchased > 0) status = 'caution';
+    preview[r.teamId] = { rank: idx + 1, totalTeams: teams.length, predictedSold: r.purchased, offered, status };
+  });
+  return preview;
+}
+
+/**
+ * Pulls the first {...} JSON object out of a raw LLM text response (tolerant
+ * of stray prose or ```json fences around it) and runs it through
+ * sanitizeShock(). Returns null on ANY parse/validation failure - this is
+ * the one function standing between "whatever the model said" and the
+ * actual game state, so it never throws, it just declines.
+ */
+function parseShockResponseText(text) {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]);
+    return sanitizeShock(parsed, 'ai');
+  } catch (err) {
+    return null;
+  }
+}
+
 module.exports = {
   CONFIG,
   normalizeWeights,
@@ -156,5 +441,14 @@ module.exports = {
   calcCompetitiveScore,
   resolveApplePurchase,
   calcMarketPrice,
-  calcCompanyValue
+  calcCompanyValue,
+  NEUTRAL_SHOCK,
+  sanitizeShock,
+  pickProceduralShock,
+  parseShockResponseText,
+  getEffectiveWeights,
+  getEffectiveDemandPerTeam,
+  getCostMultiplier,
+  getCapacityProdMultiplier,
+  computeLivePreview
 };

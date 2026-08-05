@@ -131,6 +131,37 @@
     });
   }
 
+  // ---------- market shock + live rank preview ----------
+  function showShockLoading() {
+    $('shock-loading').style.display = 'flex';
+    $('shock-banner').style.display = 'none';
+  }
+  function renderShock(shock) {
+    $('shock-loading').style.display = 'none';
+    const el = $('shock-banner');
+    if (!shock) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'flex';
+    el.classList.toggle('ai', shock.source === 'ai');
+    $('shock-icon').textContent = shock.icon || '⚡';
+    $('shock-title').textContent = shock.title;
+    $('shock-desc').textContent = shock.description;
+  }
+  function renderRankPreview(preview) {
+    const el = $('rank-preview');
+    if (!preview) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'flex';
+    el.classList.remove('safe', 'caution', 'risk');
+    el.classList.add(preview.status);
+    const label = preview.status === 'safe' ? 'On track to sell out' : preview.status === 'caution' ? `Only ${preview.predictedSold}/${preview.offered} would sell` : preview.offered === 0 ? 'Offering 0 units — nothing will sell' : 'Priced/scored too low — likely 0 sold';
+    $('rank-preview-text').textContent = `Predicted rank: ${preview.rank}/${preview.totalTeams} — ${label}`;
+  }
+
   // ---------- game screen ----------
   function renderDots(containerId, level) {
     const el = $(containerId);
@@ -146,6 +177,7 @@
     $('hdr-round').textContent = payload.round;
     $('hdr-total-rounds').textContent = payload.totalRounds;
     $('hdr-mp').textContent = payload.marketPrice ? payload.marketPrice.toFixed(0) : '—';
+    renderShock(payload.shock);
 
     renderTicker(payload.teams);
 
@@ -180,6 +212,7 @@
     $('lockin-status').textContent = me.locked
       ? '🔒 Locked in — waiting for other teams…'
       : "Locking in freezes your price and quantity for this round — you can't undo it.";
+    renderRankPreview(payload.phase === 'round_active' ? payload.preview : null);
   }
 
   function sendInputUpdate() {
@@ -208,6 +241,15 @@
   function renderResults(payload) {
     $('res-round').textContent = payload.round;
     $('res-mp').textContent = payload.marketPrice.toFixed(0);
+    const shockEl = $('res-shock-banner');
+    if (payload.shock) {
+      shockEl.style.display = 'flex';
+      $('res-shock-icon').textContent = payload.shock.icon || '⚡';
+      $('res-shock-title').textContent = payload.shock.title;
+      $('res-shock-desc').textContent = payload.shock.description;
+    } else {
+      shockEl.style.display = 'none';
+    }
     const body = $('res-table-body');
     body.innerHTML = '';
     payload.results.forEach((r, idx) => {
@@ -283,7 +325,11 @@
   $('btn-buy-cap').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
   $('in-price').addEventListener('input', sendInputUpdate);
   $('in-qty').addEventListener('input', sendInputUpdate);
-  $('btn-lockin').addEventListener('click', () => socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId }));
+  $('btn-lockin').addEventListener('click', () => {
+    const qty = Number($('in-qty').value) || 0;
+    if (qty === 0 && !confirm("You're about to lock in with 0 units offered — Apple can't buy anything from you this round. Continue anyway?")) return;
+    socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId });
+  });
   $('btn-chat-send').addEventListener('click', sendChat);
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 
@@ -297,9 +343,14 @@
     renderGameState(payload);
     if (payload.phase === 'round_active') routeScreen('round_active');
   });
-  socket.on('ROUND_START', () => {
+  socket.on('ROUND_STARTING', () => {
+    routeScreen('round_active');
+    showShockLoading();
+  });
+  socket.on('ROUND_START', (payload) => {
     lastTicker = {};
     routeScreen('round_active');
+    if (payload && payload.shock) renderShock(payload.shock);
   });
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));
   socket.on('ROUND_RESULT', (payload) => {
