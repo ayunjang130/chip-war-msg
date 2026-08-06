@@ -9,7 +9,7 @@ const CONFIG = Object.freeze({
   ROUNDS: 6,
   ROUND_TIMER_SECONDS: 180, // 3 minutes, GDD 2.3 / Match Length table
 
-  INITIAL_CAPITAL: 10000,
+  INITIAL_CAPITAL: 5000, // default Starting Budget (host-configurable per room)
   INITIAL_INVENTORY: 0,
   INITIAL_TECH: 0,
   INITIAL_CAPACITY: 0,
@@ -17,8 +17,9 @@ const CONFIG = Object.freeze({
   BASE_PRODUCTION: 100,
   PRODUCTION_PER_LEVEL: 50,
 
-  TECH_UPGRADE_COST: 2000,
-  CAPACITY_UPGRADE_COST: 1500,
+  TECH_UPGRADE_COST: 2000, // cost of the FIRST tech upgrade (0->1)
+  CAPACITY_UPGRADE_COST: 1500, // cost of the FIRST capacity upgrade (0->1)
+  UPGRADE_COST_GROWTH: 1.5, // each purchase makes the next one 1.5x more expensive
 
   TECH_MAX: 5, // Developer note: Tmax fixed at 5
   CAPACITY_MAX: 5, // Developer note: Cmax fixed at 5
@@ -56,6 +57,20 @@ function calcProduction(capacityLevel, multiplier = 1) {
   const c = Math.max(0, Math.min(capacityLevel, CONFIG.CAPACITY_MAX));
   const m = Number.isFinite(multiplier) ? multiplier : 1;
   return Math.round(CONFIG.BASE_PRODUCTION + c * CONFIG.PRODUCTION_PER_LEVEL * m);
+}
+
+/**
+ * Cost of a team's NEXT Tech/Capacity upgrade. Each purchase makes the next
+ * one UPGRADE_COST_GROWTH (1.5x) more expensive: level 0->1 costs the base
+ * price, 1->2 costs base*1.5, 2->3 costs base*1.5^2, and so on. Callers may
+ * layer additional situational multipliers (inflation, a shock) on top of
+ * this return value - this function only owns the level-based curve.
+ */
+function calcUpgradeCost(kind, currentLevel) {
+  const base = kind === 'tech' ? CONFIG.TECH_UPGRADE_COST : CONFIG.CAPACITY_UPGRADE_COST;
+  const max = kind === 'tech' ? CONFIG.TECH_MAX : CONFIG.CAPACITY_MAX;
+  const level = Math.max(0, Math.min(currentLevel, max));
+  return Math.round(base * Math.pow(CONFIG.UPGRADE_COST_GROWTH, level));
 }
 
 /** Qt = Qbase + (Ti/Tmax) x (100-Qbase); with Qbase=0 this is (Ti/5)*100 */
@@ -431,10 +446,31 @@ function parseShockResponseText(text) {
   }
 }
 
+/* ============================================================================
+ * BASIC ENGLISH PROFANITY FILTER - a plain word-list check, not an NLP
+ * moderation system. Whole-word matching only (so "class" never matches
+ * "ass") on a normalized (lowercased, punctuation-stripped) copy of the
+ * text. Easy to bypass with creative spelling; good enough to stop the
+ * common case in a classroom chat. Swap in a real moderation API later if
+ * stronger coverage is needed - see README "what to expand next".
+ * ==========================================================================*/
+const PROFANITY_WORDLIST = [
+  'fuck', 'fucking', 'fucker', 'motherfucker', 'shit', 'bullshit', 'bitch', 'asshole', 'ass',
+  'bastard', 'dick', 'pussy', 'cunt', 'whore', 'slut', 'retard', 'retarded', 'cock', 'twat',
+  'wanker', 'douchebag', 'nigger', 'nigga', 'faggot', 'fag', 'dumbass'
+];
+function containsProfanity(text) {
+  if (typeof text !== 'string' || !text) return false;
+  const normalized = text.toLowerCase().replace(/[^a-z\s]/g, ' ');
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words.some((w) => PROFANITY_WORDLIST.includes(w));
+}
+
 module.exports = {
   CONFIG,
   normalizeWeights,
   calcProduction,
+  calcUpgradeCost,
   calcTechScore,
   calcCapacityScore,
   calcPriceScores,
@@ -450,5 +486,6 @@ module.exports = {
   getEffectiveDemandPerTeam,
   getCostMultiplier,
   getCapacityProdMultiplier,
-  computeLivePreview
+  computeLivePreview,
+  containsProfanity
 };

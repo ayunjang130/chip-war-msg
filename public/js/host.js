@@ -5,6 +5,8 @@
   const socket = io();
   let myRoomCode = null;
   let lastPhase = 'lobby';
+  let lastHistory = [];
+  let charts = {};
 
   const $ = (id) => document.getElementById(id);
   function money(n) {
@@ -110,7 +112,15 @@
     $('cfg-demand').value = config.demandPerTeam;
     $('cfg-timer').value = config.roundTimerSeconds;
     $('cfg-maxteams').value = config.maxTeams;
+    $('cfg-capital').value = config.startingCapital;
+    $('cfg-inflation').value = config.inflationRatePerRound;
+    $('cfg-volatility').value = config.marketVolatility;
     $('team-max').textContent = config.maxTeams;
+    // Keep the live-monitor mini panel in sync too, so it always shows
+    // what's actually active, not just what was last typed there.
+    if (document.activeElement !== $('live-cfg-demand')) $('live-cfg-demand').value = config.demandPerTeam;
+    if (document.activeElement !== $('live-cfg-timer')) $('live-cfg-timer').value = config.roundTimerSeconds;
+    if (document.activeElement !== $('live-cfg-volatility')) $('live-cfg-volatility').value = config.marketVolatility;
     updateWeightHint();
   }
 
@@ -120,6 +130,13 @@
   }
   ['cfg-wp', 'cfg-wt', 'cfg-wc'].forEach((id) => $(id).addEventListener('input', updateWeightHint));
 
+  $('btn-toggle-advanced').addEventListener('click', () => {
+    const panel = $('advanced-settings');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    $('btn-toggle-advanced').textContent = showing ? 'Advanced Settings ▾' : 'Advanced Settings ▴';
+  });
+
   $('btn-save-config').addEventListener('click', () => {
     socket.emit('HOST_UPDATE_CONFIG', {
       roomCode: myRoomCode,
@@ -127,12 +144,39 @@
         weights: { price: Number($('cfg-wp').value) || 0, tech: Number($('cfg-wt').value) || 0, capacity: Number($('cfg-wc').value) || 0 },
         demandPerTeam: Number($('cfg-demand').value) || 200,
         roundTimerSeconds: Number($('cfg-timer').value) || 180,
-        maxTeams: Number($('cfg-maxteams').value) || 8
+        maxTeams: Number($('cfg-maxteams').value) || 8,
+        startingCapital: Number($('cfg-capital').value) || 5000,
+        inflationRatePerRound: Number($('cfg-inflation').value) || 0,
+        marketVolatility: Number($('cfg-volatility').value) || 1
       }
     });
     $('config-saved-hint').textContent = 'Saved ✓';
     setTimeout(() => ($('config-saved-hint').textContent = ''), 1500);
   });
+
+  $('btn-live-apply').addEventListener('click', () => {
+    socket.emit('HOST_UPDATE_CONFIG', {
+      roomCode: myRoomCode,
+      config: {
+        demandPerTeam: Number($('live-cfg-demand').value) || 200,
+        roundTimerSeconds: Number($('live-cfg-timer').value) || 180,
+        marketVolatility: Number($('live-cfg-volatility').value) || 1
+      }
+    });
+    $('live-config-saved-hint').textContent = 'Applied ✓ — demand/volatility affect this round, timer affects the next one';
+    setTimeout(() => ($('live-config-saved-hint').textContent = ''), 2500);
+  });
+
+  function confirmDestroyRoom() {
+    if (!confirm('Destroy this room? Every connected player will be disconnected and this cannot be undone.')) return;
+    socket.emit('HOST_DESTROY_ROOM', { roomCode: myRoomCode });
+    localStorage.removeItem(HOST_SESSION_KEY);
+    myRoomCode = null;
+    document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
+    $('screen-setup').classList.add('active');
+  }
+  $('btn-destroy-room-lobby').addEventListener('click', confirmDestroyRoom);
+  $('btn-destroy-room-live').addEventListener('click', confirmDestroyRoom);
 
   document.querySelectorAll('[data-bot]').forEach((btn) => {
     btn.addEventListener('click', () => socket.emit('HOST_ADD_BOT', { roomCode: myRoomCode, strategy: btn.dataset.bot }));
@@ -153,16 +197,20 @@
       const row = document.createElement('div');
       row.className = 'pill';
       row.style.justifyContent = 'flex-start';
+      const label = t.teamName && t.teamName !== t.companyName ? escapeHtml(t.companyName) + ' <span class="hint-text">(' + escapeHtml(t.teamName) + ')</span>' : escapeHtml(t.companyName);
       row.innerHTML =
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
-        '<span style="flex:1">' + t.companyName + '</span>' +
+        '<span style="flex:1">' + label + '</span>' +
         (t.isBot ? '<span class="badge badge-bot">BOT</span>' : '') +
         (!t.connected && !t.isBot ? '<span class="badge badge-offline">OFFLINE</span>' : '') +
         '<button class="btn btn-sm btn-red" data-kick="' + t.teamId + '" style="margin-left:8px;">Kick</button>';
       list.appendChild(row);
     });
     list.querySelectorAll('[data-kick]').forEach((b) => {
-      b.addEventListener('click', () => socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId: b.dataset.kick }));
+      b.addEventListener('click', () => {
+        if (!confirm('Remove this team from the room?')) return;
+        socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId: b.dataset.kick });
+      });
     });
     $('btn-start-game').disabled = payload.teams.length < 3;
     if (payload.teams.length < 3) $('start-error').textContent = 'Need at least 3 teams to start.';
@@ -176,15 +224,23 @@
     body.innerHTML = '';
     payload.teams.forEach((t) => {
       const tr = document.createElement('tr');
+      const label = t.teamName && t.teamName !== t.companyName ? escapeHtml(t.companyName) + ' <span class="hint-text">(' + escapeHtml(t.teamName) + ')</span>' : escapeHtml(t.companyName);
       tr.innerHTML =
-        '<td style="color:' + colorFor(t.teamId) + '">' + t.companyName + (t.isBot ? ' 🤖' : '') + '</td>' +
+        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' 🤖' : '') + '</td>' +
         '<td>' + (t.locked ? '🔒' : '⏳') + '</td>' +
         '<td>$' + t.price + '</td>' +
         '<td>' + t.quantity + '</td>' +
         '<td>Lv' + t.techLevel + '</td>' +
         '<td>Lv' + t.capacityLevel + '</td>' +
-        '<td>' + (t.capital != null ? money(t.capital) : '—') + '</td>';
+        '<td>' + (t.capital != null ? money(t.capital) : '—') + '</td>' +
+        '<td><button class="btn btn-sm btn-red" data-kick-live="' + t.teamId + '">Kick</button></td>';
       body.appendChild(tr);
+    });
+    body.querySelectorAll('[data-kick-live]').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (!confirm('Remove this team from the room? Their in-progress round will just be dropped.')) return;
+        socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId: b.dataset.kickLive });
+      });
     });
   }
 
@@ -203,8 +259,9 @@
     body.innerHTML = '';
     payload.results.forEach((r) => {
       const tr = document.createElement('tr');
+      const label = r.teamName && r.teamName !== r.companyName ? escapeHtml(r.companyName) + ' <span class="hint-text">(' + escapeHtml(r.teamName) + ')</span>' : escapeHtml(r.companyName);
       tr.innerHTML =
-        '<td style="color:' + colorFor(r.teamId) + '">' + r.companyName + '</td>' +
+        '<td style="color:' + colorFor(r.teamId) + '">' + label + '</td>' +
         '<td>$' + r.price + '</td>' +
         '<td>' + r.quantitySold + '</td>' +
         '<td>' + money(r.revenue) + '</td>' +
@@ -220,14 +277,84 @@
     payload.leaderboard.forEach((t, idx) => {
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
+      const nameLine = escapeHtml(t.companyName) + (t.teamName && t.teamName !== t.companyName ? ' <span class="hint-text" style="font-family:var(--body); font-weight:400;">(' + escapeHtml(t.teamName) + ')</span>' : '');
       row.innerHTML =
         '<div class="rank">' + (idx + 1) + '</div>' +
-        '<div class="name"><b>' + t.companyName + '</b>' +
+        '<div class="name"><b>' + nameLine + '</b>' +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' · tech Lv' + t.techLevel + ' · capacity Lv' + t.capacityLevel + '</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
       el.appendChild(row);
     });
+    lastHistory = payload.history || [];
+    renderCharts(lastHistory);
   }
+
+  // ---------- post-match charts + CSV export (same shape as the player view) ----------
+  function destroyCharts() {
+    Object.values(charts).forEach((c) => c && c.destroy());
+    charts = {};
+  }
+  function chartOptions() {
+    return {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#e7edf5', font: { family: 'Inter' } } } },
+      scales: {
+        x: { ticks: { color: '#7d8798' }, grid: { color: '#212a3a' } },
+        y: { ticks: { color: '#7d8798' }, grid: { color: '#212a3a' } }
+      }
+    };
+  }
+  function renderCharts(history) {
+    destroyCharts();
+    if (!history || !history.length || typeof Chart === 'undefined') return;
+    const labels = history.map((h) => 'R' + h.round);
+    const teamIds = [];
+    const teamMeta = {};
+    history.forEach((h) =>
+      h.results.forEach((r) => {
+        if (!(r.teamId in teamMeta)) teamIds.push(r.teamId);
+        teamMeta[r.teamId] = r.companyName;
+      })
+    );
+    const seriesFor = (pick) =>
+      teamIds.map((id) => ({
+        label: teamMeta[id],
+        data: history.map((h) => {
+          const r = h.results.find((x) => x.teamId === id);
+          return r ? pick(r) : null;
+        }),
+        borderColor: colorFor(id),
+        backgroundColor: colorFor(id),
+        tension: 0.25,
+        spanGaps: true
+      }));
+    const valueData = seriesFor((r) => r.capital + r.unsoldInventory * 10 + r.techLevel * 500 + r.capacityLevel * 500);
+    const priceData = seriesFor((r) => r.price);
+    const mpData = [{ label: 'Market Price', data: history.map((h) => h.marketPrice), borderColor: '#f0b429', backgroundColor: '#f0b429', tension: 0.25 }];
+    if ($('chart-value')) charts.value = new Chart($('chart-value').getContext('2d'), { type: 'line', data: { labels, datasets: valueData }, options: chartOptions() });
+    if ($('chart-price')) charts.price = new Chart($('chart-price').getContext('2d'), { type: 'line', data: { labels, datasets: priceData }, options: chartOptions() });
+    if ($('chart-mp')) charts.mp = new Chart($('chart-mp').getContext('2d'), { type: 'line', data: { labels, datasets: mpData }, options: chartOptions() });
+  }
+  function downloadMatchCSV() {
+    if (!lastHistory || !lastHistory.length) return;
+    const rows = [['round', 'marketPrice', 'shockTitle', 'teamName', 'companyName', 'price', 'quantityOffered', 'quantitySold', 'revenue', 'unsoldInventory', 'capital', 'techLevel', 'capacityLevel', 'competitiveScore']];
+    lastHistory.forEach((h) => {
+      h.results.forEach((r) => {
+        rows.push([h.round, h.marketPrice, h.shock ? h.shock.title : '', r.teamName || '', r.companyName, r.price, r.quantityOffered, r.quantitySold, r.revenue, r.unsoldInventory, r.capital, r.techLevel, r.capacityLevel, r.competitiveScore]);
+      });
+    });
+    const csv = rows.map((row) => row.map((cell) => { const s = String(cell == null ? '' : cell); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chip-war-match-' + (myRoomCode || 'data') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  $('btn-download-csv').addEventListener('click', downloadMatchCSV);
 
   // ---------- chat ----------
   function appendChat(msg) {
@@ -261,7 +388,14 @@
   socket.on('LOBBY_UPDATE', (payload) => {
     if (payload.roomCode !== myRoomCode) return;
     renderTeamList(payload);
+    applyConfigToInputs(payload.config);
     if (payload.phase === 'lobby') routeScreen('lobby');
+  });
+  socket.on('ROOM_CLOSED', () => {
+    localStorage.removeItem(HOST_SESSION_KEY);
+    myRoomCode = null;
+    document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
+    $('screen-setup').classList.add('active');
   });
   socket.on('STATE_SYNC', (payload) => {
     if (!myRoomCode) return;

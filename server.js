@@ -46,7 +46,7 @@ function genRoomCode() {
   return rooms[code] ? genRoomCode() : code;
 }
 
-function createTeamState(teamId, teamName, companyName, socketId, isBot = false, botStrategy = null) {
+function createTeamState(teamId, teamName, companyName, socketId, startingCapital, isBot = false, botStrategy = null) {
   return {
     teamId,
     teamName,
@@ -55,7 +55,7 @@ function createTeamState(teamId, teamName, companyName, socketId, isBot = false,
     connected: !isBot,
     isBot,
     botStrategy,
-    capital: engine.CONFIG.INITIAL_CAPITAL,
+    capital: startingCapital,
     inventory: engine.CONFIG.INITIAL_INVENTORY,
     techLevel: engine.CONFIG.INITIAL_TECH,
     capacityLevel: engine.CONFIG.INITIAL_CAPACITY,
@@ -92,7 +92,10 @@ function createRoom(hostSocketId) {
       weights: { ...engine.CONFIG.WEIGHTS_DEFAULT },
       demandPerTeam: engine.CONFIG.DEMAND_PER_TEAM,
       roundTimerSeconds: engine.CONFIG.ROUND_TIMER_SECONDS,
-      maxTeams: 8
+      maxTeams: 8,
+      startingCapital: engine.CONFIG.INITIAL_CAPITAL, // Starting Budget, default $5,000
+      inflationRatePerRound: 0, // compounds onto upgrade costs each round, 0-0.5
+      marketVolatility: 1 // scales how far each round's shock swings from neutral, 0.5-2.0
     }
   };
   return rooms[code];
@@ -101,7 +104,7 @@ function createRoom(hostSocketId) {
 // ---- Hidden-information rules (GDD 2.10 / 2.11) --------------------------
 // Price, quantity, tech level and capacity level are always public.
 // Capital ("cash reserves") is only shown to the owning team and to the host.
-function publicTeam(team, viewerTeamId, isPrivileged) {
+function publicTeam(team, viewerTeamId, isPrivileged, room) {
   const showCapital = isPrivileged || team.teamId === viewerTeamId;
   return {
     teamId: team.teamId,
@@ -115,6 +118,8 @@ function publicTeam(team, viewerTeamId, isPrivileged) {
     capacityLevel: team.capacityLevel,
     inventory: team.inventory,
     locked: team.locked,
+    nextTechCost: team.techLevel < engine.CONFIG.TECH_MAX ? roomUpgradeCost(room, 'tech', team.techLevel) : null,
+    nextCapacityCost: team.capacityLevel < engine.CONFIG.CAPACITY_MAX ? roomUpgradeCost(room, 'capacity', team.capacityLevel) : null,
     capital: showCapital ? Math.round(team.capital) : null
   };
 }
@@ -137,7 +142,7 @@ function broadcastState(room) {
       marketPrice: room.marketPrice,
       shock: publicShock(room.activeShock, false),
       preview: preview[viewer.teamId] || null,
-      teams: teamList.map((t) => publicTeam(t, viewer.teamId, false))
+      teams: teamList.map((t) => publicTeam(t, viewer.teamId, false, room))
     });
   });
   if (room.hostSocketId) {
@@ -149,7 +154,7 @@ function broadcastState(room) {
       paused: room.paused,
       marketPrice: room.marketPrice,
       shock: publicShock(room.activeShock, true),
-      teams: teamList.map((t) => publicTeam(t, null, true))
+      teams: teamList.map((t) => publicTeam(t, null, true, room))
     });
   }
 }
@@ -184,17 +189,54 @@ function publicShock(shock, detailed) {
 
 // Small per-room wrappers so call sites don't have to remember to pass
 // room.config.weights + room.activeShock into engine.js every time.
+//
+// "Market Volatility" (Advanced Setting, default 1.0x) scales how far every
+// shock effect deviates from "no change" (1.0) - it's how "물가상승률/소비자
+// 감수성/광고 효율성 같은 외부 변수의 난이도" turned into ONE well-defined
+// dial instead of three underspecified ones: at 0.5x a shock that would have
+// been "-40% Capacity" becomes "-20%"; at 2.0x it becomes "-80%". 1.0x = the
+// shock plays out exactly as generated.
+function getVolatilityAdjustedShock(room) {
+  const shock = room.activeShock;
+  const v = room.config.marketVolatility != null ? room.config.marketVolatility : 1;
+  if (!shock || v === 1) return shock;
+  const dev = (x) => 1 + ((x != null ? x : 1) - 1) * v;
+  const b = shock.effects.weightBias || {};
+  return {
+    ...shock,
+    effects: {
+      capacityProductionMultiplier: dev(shock.effects.capacityProductionMultiplier),
+      techUpgradeCostMultiplier: dev(shock.effects.techUpgradeCostMultiplier),
+      capacityUpgradeCostMultiplier: dev(shock.effects.capacityUpgradeCostMultiplier),
+      demandMultiplier: dev(shock.effects.demandMultiplier),
+      weightBias: { price: dev(b.price), tech: dev(b.tech), capacity: dev(b.capacity) }
+    }
+  };
+}
+
 function roomWeights(room) {
-  return engine.getEffectiveWeights(room.config.weights, room.activeShock);
+  return engine.getEffectiveWeights(room.config.weights, getVolatilityAdjustedShock(room));
 }
 function roomDemandPerTeam(room) {
-  return engine.getEffectiveDemandPerTeam(room.config.demandPerTeam, room.activeShock);
+  return engine.getEffectiveDemandPerTeam(room.config.demandPerTeam, getVolatilityAdjustedShock(room));
 }
 function roomCostMultiplier(room, kind) {
-  return engine.getCostMultiplier(room.activeShock, kind);
+  return engine.getCostMultiplier(getVolatilityAdjustedShock(room), kind);
 }
 function roomCapacityProdMultiplier(room) {
-  return engine.getCapacityProdMultiplier(room.activeShock);
+  return engine.getCapacityProdMultiplier(getVolatilityAdjustedShock(room));
+}
+// The ONE place that decides what a team's next Tech/Capacity upgrade
+// actually costs: engine's 1.5x-per-purchase curve, compounded by this
+// room's inflation rate (per round elapsed) and this round's shock. Used
+// both to charge the team AND to show them the true number beforehand.
+function roomUpgradeCost(room, kind, currentLevel) {
+  const base = engine.calcUpgradeCost(kind, currentLevel);
+  const inflationRate = room.config.inflationRatePerRound || 0;
+  const roundsElapsed = Math.max(0, room.round - 1);
+  const inflationFactor = Math.pow(1 + inflationRate, roundsElapsed);
+  const shockFactor = roomCostMultiplier(room, kind);
+  return Math.max(1, Math.round(base * inflationFactor * shockFactor));
 }
 
 const SHOCK_SCHEMA_HINT = `Respond with ONLY one JSON object - no markdown fences, no commentary before or after - shaped exactly like this:
@@ -352,9 +394,9 @@ function botAct(room, team) {
   for (let guard = 0; guard < 10 && budget > 0; guard++) {
     let bought = false;
     for (const kind of priority) {
-      const cost = kind === 'tech' ? engine.CONFIG.TECH_UPGRADE_COST : engine.CONFIG.CAPACITY_UPGRADE_COST;
       const level = kind === 'tech' ? team.techLevel : team.capacityLevel;
       const max = kind === 'tech' ? engine.CONFIG.TECH_MAX : engine.CONFIG.CAPACITY_MAX;
+      const cost = roomUpgradeCost(room, kind, level);
       if (budget >= cost && level < max && Math.random() < 0.7) {
         if (kind === 'tech') team.techLevel += 1;
         else team.capacityLevel += 1;
@@ -487,7 +529,7 @@ function endGame(room) {
       companyValue: Math.round(engine.calcCompanyValue(t))
     }))
     .sort((a, b) => b.companyValue - a.companyValue);
-  const payload = { leaderboard: teams, winner: teams[0] || null };
+  const payload = { leaderboard: teams, winner: teams[0] || null, history: room.history };
   room.finalPayload = payload;
   io.to(room.code).emit('GAME_OVER', payload);
 }
@@ -507,7 +549,7 @@ function resetRoom(room) {
   room.lastResultsPayload = null;
   room.finalPayload = null;
   Object.values(room.teams).forEach((t) => {
-    t.capital = engine.CONFIG.INITIAL_CAPITAL;
+    t.capital = room.config.startingCapital;
     t.inventory = engine.CONFIG.INITIAL_INVENTORY;
     t.techLevel = engine.CONFIG.INITIAL_TECH;
     t.capacityLevel = engine.CONFIG.INITIAL_CAPACITY;
@@ -559,6 +601,12 @@ io.on('connection', (socket) => {
       team.socketId = socket.id;
       team.connected = true;
     } else {
+      // A brand-new team can only join while the room is still in the lobby
+      // - letting someone parachute into an in-progress round with 0
+      // inventory/investment was confusing and unfair to everyone.
+      if (room.phase !== 'lobby') {
+        return cb && cb({ ok: false, error: 'GAME_IN_PROGRESS' });
+      }
       if (Object.keys(room.teams).length >= room.config.maxTeams) {
         return cb && cb({ ok: false, error: 'ROOM_FULL' });
       }
@@ -571,7 +619,7 @@ io.on('connection', (socket) => {
         suffix += 1;
         candidate = `${base} ${suffix}`;
       }
-      team = createTeamState(id, (teamName || `Team ${Object.keys(room.teams).length + 1}`).trim(), candidate, socket.id);
+      team = createTeamState(id, (teamName || `Team ${Object.keys(room.teams).length + 1}`).trim(), candidate, socket.id, room.config.startingCapital);
       room.teams[id] = team;
     }
 
@@ -588,6 +636,21 @@ io.on('connection', (socket) => {
       io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
     } else if (room.phase === 'game_over' && room.finalPayload) {
       io.to(socket.id).emit('GAME_OVER', room.finalPayload);
+    }
+  });
+
+  // A player backing out of a room they haven't really started playing in
+  // yet. Restricted to the lobby - once a match is running, disconnect (tab
+  // close) is the supported way out, since a team mid-round has already
+  // affected production/history that shouldn't just vanish.
+  socket.on('LEAVE_ROOM', ({ roomCode, teamId }) => {
+    const room = rooms[roomCode];
+    if (!room || room.phase !== 'lobby') return;
+    if (teamId && room.teams[teamId]) {
+      delete room.teams[teamId];
+      delete socketMeta[socket.id];
+      broadcastLobby(room);
+      broadcastState(room);
     }
   });
 
@@ -617,11 +680,11 @@ io.on('connection', (socket) => {
     // Debt & Comeback Handling: negative capital from aggressive investment
     // is explicitly allowed, so the only gate here is the level cap.
     if (kind === 'tech' && team.techLevel < engine.CONFIG.TECH_MAX) {
-      const cost = Math.round(engine.CONFIG.TECH_UPGRADE_COST * roomCostMultiplier(room, 'tech'));
+      const cost = roomUpgradeCost(room, 'tech', team.techLevel);
       team.techLevel += 1;
       team.capital -= cost;
     } else if (kind === 'capacity' && team.capacityLevel < engine.CONFIG.CAPACITY_MAX) {
-      const cost = Math.round(engine.CONFIG.CAPACITY_UPGRADE_COST * roomCostMultiplier(room, 'capacity'));
+      const cost = roomUpgradeCost(room, 'capacity', team.capacityLevel);
       team.capacityLevel += 1;
       team.capital -= cost;
     }
@@ -642,9 +705,14 @@ io.on('connection', (socket) => {
   socket.on('CHAT_MESSAGE', ({ roomCode, teamId, text }) => {
     const room = rooms[roomCode];
     if (!room || !text || !String(text).trim()) return;
+    const trimmed = String(text).slice(0, 240);
+    if (engine.containsProfanity(trimmed)) {
+      io.to(socket.id).emit('CHAT_BLOCKED', { reason: 'Message blocked - please keep the chat appropriate.' });
+      return;
+    }
     const sender = teamId ? room.teams[teamId] : null;
     const name = sender ? sender.companyName : 'HOST';
-    const msg = { id: genId('msg'), name, text: String(text).slice(0, 240), at: Date.now() };
+    const msg = { id: genId('msg'), name, text: trimmed, at: Date.now() };
     room.chatLog.push(msg);
     if (room.chatLog.length > 200) room.chatLog.shift();
     io.to(roomCode).emit('CHAT_MESSAGE', msg);
@@ -652,18 +720,35 @@ io.on('connection', (socket) => {
 
   socket.on('HOST_UPDATE_CONFIG', ({ roomCode, config }) => {
     const room = rooms[roomCode];
-    if (!room || socket.id !== room.hostSocketId || room.phase !== 'lobby') return;
-    if (config.weights) room.config.weights = engine.normalizeWeights(config.weights);
+    if (!room || socket.id !== room.hostSocketId || !config) return;
+    // These two are safe to change mid-match: they're only ever read fresh
+    // at the moment they matter (round start / round resolution), so a
+    // change here takes effect on the very next thing that reads it - no
+    // more "the number changes in the box but never actually applies".
     if (config.demandPerTeam != null) {
       room.config.demandPerTeam = Math.max(1, Number(config.demandPerTeam) || engine.CONFIG.DEMAND_PER_TEAM);
     }
     if (config.roundTimerSeconds != null) {
       room.config.roundTimerSeconds = Math.max(30, Number(config.roundTimerSeconds) || engine.CONFIG.ROUND_TIMER_SECONDS);
     }
-    if (config.maxTeams != null) {
-      room.config.maxTeams = Math.min(8, Math.max(3, Number(config.maxTeams) || 8));
+    if (config.marketVolatility != null) {
+      room.config.marketVolatility = Math.min(2, Math.max(0.5, Number(config.marketVolatility) || 1));
+    }
+    // Everything else only makes sense before teams start playing with it.
+    if (room.phase === 'lobby') {
+      if (config.weights) room.config.weights = engine.normalizeWeights(config.weights);
+      if (config.maxTeams != null) {
+        room.config.maxTeams = Math.min(8, Math.max(3, Number(config.maxTeams) || 8));
+      }
+      if (config.startingCapital != null) {
+        room.config.startingCapital = Math.max(500, Number(config.startingCapital) || engine.CONFIG.INITIAL_CAPITAL);
+      }
+      if (config.inflationRatePerRound != null) {
+        room.config.inflationRatePerRound = Math.min(0.5, Math.max(0, Number(config.inflationRatePerRound) || 0));
+      }
     }
     broadcastLobby(room);
+    broadcastState(room);
   });
 
   socket.on('HOST_ADD_BOT', ({ roomCode, strategy }) => {
@@ -679,7 +764,7 @@ io.on('connection', (socket) => {
       name = `${label} ${n}`;
     }
     const id = genId('bot');
-    room.teams[id] = createTeamState(id, name, name, null, true, strategy || 'balanced');
+    room.teams[id] = createTeamState(id, name, name, null, room.config.startingCapital, true, strategy || 'balanced');
     broadcastLobby(room);
     broadcastState(room);
   });
@@ -687,9 +772,31 @@ io.on('connection', (socket) => {
   socket.on('HOST_KICK_TEAM', ({ roomCode, teamId }) => {
     const room = rooms[roomCode];
     if (!room || socket.id !== room.hostSocketId) return;
+    const team = room.teams[teamId];
+    if (team && team.socketId) {
+      io.to(team.socketId).emit('KICKED', { reason: 'The host removed you from this room.' });
+      delete socketMeta[team.socketId];
+    }
     delete room.teams[teamId];
     broadcastLobby(room);
     broadcastState(room);
+  });
+
+  // Closes the room outright: every connected player/host gets a heads-up,
+  // then the room is wiped from memory. This is the fix for "host removes
+  // the room but the player is still stuck in it" - previously there was no
+  // explicit close, so a connected client just never heard about it.
+  socket.on('HOST_DESTROY_ROOM', ({ roomCode }) => {
+    const room = rooms[roomCode];
+    if (!room || socket.id !== room.hostSocketId) return;
+    if (room.timerHandle) clearInterval(room.timerHandle);
+    if (room.nextRoundHandle) clearTimeout(room.nextRoundHandle);
+    io.to(room.code).emit('ROOM_CLOSED', { reason: 'The host has closed this room.' });
+    Object.values(room.teams).forEach((t) => {
+      if (t.socketId) delete socketMeta[t.socketId];
+    });
+    delete socketMeta[socket.id];
+    delete rooms[roomCode];
   });
 
   socket.on('HOST_START_GAME', ({ roomCode }) => {

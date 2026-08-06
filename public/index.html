@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -48,6 +49,17 @@
       <div id="lobby-team-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
     </div>
     <div class="center-msg" id="lobby-waiting-msg">Waiting for host to start Round 1…</div>
+    <button class="btn btn-block" id="btn-leave-room" style="margin-top:14px;">Exit This Room</button>
+  </div>
+</section>
+
+<!-- ============ SCREEN: JOIN BLOCKED (game already in progress) ============ -->
+<section id="screen-blocked" class="screen">
+  <div class="wrap" style="max-width:480px; padding-top:96px; text-align:center;">
+    <p class="eyebrow">can't join right now</p>
+    <h1>The game has already started</h1>
+    <p>Please wait until the host resets the room or starts a new match, or try a different room code.</p>
+    <button class="btn btn-gold btn-block" id="btn-exit-blocked" style="margin-top:22px;">Exit This Room</button>
   </div>
 </section>
 
@@ -91,15 +103,15 @@
           <h3>Investment</h3>
           <div class="upgrade-row">
             <div class="levels" id="tech-dots"></div>
-            <div class="name"><b>Technology</b><span>Lv <span id="tech-level">0</span>/5 · $2,000/level · improves purchase priority now</span></div>
+            <div class="name"><b>Technology</b><span>Lv <span id="tech-level">0</span>/5 · next upgrade $<span id="tech-cost">2,000</span> · improves purchase priority now</span></div>
             <button class="btn btn-sm" id="btn-buy-tech">Buy</button>
           </div>
           <div class="upgrade-row">
             <div class="levels" id="cap-dots"></div>
-            <div class="name"><b>Capacity</b><span>Lv <span id="cap-level">0</span>/5 · $1,500/level · boosts production next round</span></div>
+            <div class="name"><b>Capacity</b><span>Lv <span id="cap-level">0</span>/5 · next upgrade $<span id="cap-cost">1,500</span> · boosts production next round</span></div>
             <button class="btn btn-sm" id="btn-buy-cap">Buy</button>
           </div>
-          <div class="inline-hint">💡 Tech raises your score right away. Capacity gives you more chips to sell starting <b style="color:var(--ink)">next</b> round. Both are permanent — no refunds.</div>
+          <div class="inline-hint">💡 Tech raises your score right away. Capacity gives you more chips to sell starting <b style="color:var(--ink)">next</b> round. Both are permanent — no refunds. Each upgrade makes the next one 1.5x more expensive.</div>
         </div>
 
         <div class="card">
@@ -168,11 +180,26 @@
 
 <!-- ============ SCREEN: GAME OVER ============ -->
 <section id="screen-gameover" class="screen">
-  <div class="wrap" style="max-width:640px; padding-top:56px;">
+  <div class="wrap" style="max-width:720px; padding-top:56px;">
     <p class="eyebrow">final results — round 6 complete</p>
     <h1 id="final-winner-banner">🏆 —</h1>
     <div id="final-leaderboard" style="margin-top:22px;"></div>
     <div class="howto-formula">Company Value = Cash + (unsold chips × $10) + (Tech level × $500) + (Capacity level × $500)</div>
+
+    <div class="card" style="margin-top:18px;">
+      <h3>Company Value by round</h3>
+      <canvas id="chart-value" height="220"></canvas>
+    </div>
+    <div class="card">
+      <h3>Price by round</h3>
+      <canvas id="chart-price" height="220"></canvas>
+    </div>
+    <div class="card">
+      <h3>Market price trend</h3>
+      <canvas id="chart-mp" height="180"></canvas>
+    </div>
+
+    <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">⬇️ Download match data (CSV)</button>
     <div class="center-msg">Ask your host to start a new match when ready.</div>
   </div>
 </section>

@@ -175,3 +175,27 @@ console.log('All market-shock + live-preview checks passed.');
 }
 
 console.log('All parseShockResponseText checks passed.');
+
+// 14) calcUpgradeCost escalates 1.5x per purchase, and clamps at max level
+{
+  assert.strictEqual(e.calcUpgradeCost('tech', 0), 2000, 'first tech upgrade costs the base price');
+  assert.strictEqual(e.calcUpgradeCost('tech', 1), 3000, 'second tech upgrade costs 1.5x base (2000*1.5)');
+  assert.strictEqual(e.calcUpgradeCost('tech', 2), 4500, 'third tech upgrade costs 1.5^2 x base');
+  approx(e.calcUpgradeCost('tech', 4), 10125, 'fifth tech upgrade follows the curve (2000*1.5^4)');
+  assert.strictEqual(e.calcUpgradeCost('capacity', 0), 1500, 'first capacity upgrade costs the base price');
+  assert.strictEqual(e.calcUpgradeCost('capacity', 1), 2250, 'second capacity upgrade costs 1.5x base (1500*1.5)');
+  // level input is clamped so an out-of-range value can never crash or return nonsense
+  assert.strictEqual(e.calcUpgradeCost('tech', 99), e.calcUpgradeCost('tech', 5), 'level above max clamps to max, does not extrapolate forever');
+}
+
+// 15) containsProfanity does whole-word matching only (no false positives on innocent words)
+{
+  assert.strictEqual(e.containsProfanity('this is a totally normal chat message'), false, 'clean message passes');
+  assert.strictEqual(e.containsProfanity('my classmate has a glass of grass'), false, '"ass"-containing but innocent words are NOT false-flagged (class/glass/grass)');
+  assert.strictEqual(e.containsProfanity('you are a Fucking idiot'), true, 'catches profanity regardless of capitalization');
+  assert.strictEqual(e.containsProfanity('what the shit is going on'), true, 'catches profanity in the middle of a sentence');
+  assert.strictEqual(e.containsProfanity(''), false, 'empty string is never flagged');
+  assert.strictEqual(e.containsProfanity(undefined), false, 'non-string input never throws, just returns false');
+}
+
+console.log('All calcUpgradeCost + containsProfanity checks passed.');

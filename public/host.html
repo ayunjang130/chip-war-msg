@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -42,10 +43,12 @@
           <button class="btn btn-sm" data-bot="balanced">+ AI Balanced-Bot</button>
         </div>
         <p class="hint-text">Bots are a prototype extra — useful for solo testing, not part of the original design doc.</p>
+        <button class="btn btn-sm btn-red" id="btn-destroy-room-lobby" style="margin-top:10px;">Destroy this room</button>
       </div>
 
       <div class="card">
         <h3>Match configuration</h3>
+        <p class="hint-text">Defaults work fine for most matches — 3 fields below (Wp/Wt/Wc weights, timer, teams) are the essentials. Everything else is optional.</p>
         <div class="field">
           <label>Price weight (Wp) / Tech weight (Wt) / Capacity weight (Wc)</label>
           <div class="two-col" style="grid-template-columns: 1fr 1fr 1fr;">
@@ -56,10 +59,6 @@
           <div class="hint-text" id="weight-sum-hint">Sum: 1.00 (auto-normalized on save either way)</div>
         </div>
         <div class="field">
-          <label for="cfg-demand">Apple demand per team (units)</label>
-          <input id="cfg-demand" type="number" min="10" step="10" value="200">
-        </div>
-        <div class="field">
           <label for="cfg-timer">Round timer (seconds)</label>
           <input id="cfg-timer" type="number" min="30" step="10" value="180">
         </div>
@@ -67,7 +66,31 @@
           <label for="cfg-maxteams">Max teams (3–8)</label>
           <input id="cfg-maxteams" type="number" min="3" max="8" step="1" value="8">
         </div>
-        <button class="btn btn-block" id="btn-save-config">Save configuration</button>
+
+        <button class="btn btn-sm" id="btn-toggle-advanced" type="button">Advanced Settings ▾</button>
+        <div id="advanced-settings" style="display:none; margin-top:12px;">
+          <div class="field">
+            <label for="cfg-demand">Apple demand per team (units)</label>
+            <input id="cfg-demand" type="number" min="10" step="10" value="200">
+          </div>
+          <div class="field">
+            <label for="cfg-capital">Starting Budget ($)</label>
+            <input id="cfg-capital" type="number" min="500" step="500" value="5000">
+            <div class="hint-text">How much cash every team starts round 1 with.</div>
+          </div>
+          <div class="field">
+            <label for="cfg-inflation">Inflation rate per round (0–50%)</label>
+            <input id="cfg-inflation" type="number" min="0" max="0.5" step="0.01" value="0">
+            <div class="hint-text">Compounds onto Tech/Capacity upgrade costs every round — e.g. 0.05 = 5% pricier per round on top of the normal 1.5x-per-purchase curve.</div>
+          </div>
+          <div class="field">
+            <label for="cfg-volatility">Market volatility (0.5–2.0x)</label>
+            <input id="cfg-volatility" type="number" min="0.5" max="2" step="0.1" value="1">
+            <div class="hint-text">Scales how strongly every round's Market Shock swings away from neutral — covers "how harsh should external/advertising-style events be". Live-adjustable, even mid-match.</div>
+          </div>
+        </div>
+
+        <button class="btn btn-block" id="btn-save-config" style="margin-top:14px;">Save configuration</button>
         <div class="hint-text" id="config-saved-hint" style="text-align:center;"></div>
       </div>
     </div>
@@ -100,6 +123,26 @@
       </div>
     </div>
 
+    <div class="card">
+      <h3>Live-adjustable settings <span class="hint-text">(these apply immediately, even mid-round)</span></h3>
+      <div class="two-col" style="grid-template-columns: 1fr 1fr 1fr 1fr; align-items:end;">
+        <div class="field">
+          <label for="live-cfg-demand">Apple demand/team</label>
+          <input id="live-cfg-demand" type="number" min="10" step="10">
+        </div>
+        <div class="field">
+          <label for="live-cfg-timer">Round timer (s)</label>
+          <input id="live-cfg-timer" type="number" min="30" step="10">
+        </div>
+        <div class="field">
+          <label for="live-cfg-volatility">Market volatility</label>
+          <input id="live-cfg-volatility" type="number" min="0.5" max="2" step="0.1">
+        </div>
+        <button class="btn btn-sm" id="btn-live-apply" style="margin-bottom:12px;">Apply now</button>
+      </div>
+      <div class="hint-text" id="live-config-saved-hint"></div>
+    </div>
+
         <div class="shock-loading" id="shock-loading" style="display:none;"><span class="spin"></span> Deciding this round's market shock…</div>
     <div class="shock-banner" id="shock-banner" style="display:none;">
       <div class="icon" id="shock-icon">⚡</div>
@@ -113,7 +156,7 @@
     <div class="card" style="overflow-x:auto;">
       <h3>Live team status <span class="hint-text">(host sees capital — players only see their own)</span></h3>
       <table style="margin-top:8px;">
-        <thead><tr><th>Company</th><th>Locked</th><th>Price</th><th>Qty</th><th>Tech</th><th>Cap</th><th>Capital</th></tr></thead>
+        <thead><tr><th>Company</th><th>Locked</th><th>Price</th><th>Qty</th><th>Tech</th><th>Cap</th><th>Capital</th><th></th></tr></thead>
         <tbody id="live-table-body"></tbody>
       </table>
     </div>
@@ -138,16 +181,33 @@
         <button class="btn btn-sm" id="btn-chat-send">Send</button>
       </div>
     </div>
+
+    <button class="btn btn-red btn-block" id="btn-destroy-room-live" style="margin-top:10px;">Destroy this room</button>
   </div>
 </section>
 
 <!-- ============ SCREEN: GAME OVER ============ -->
 <section id="screen-gameover" class="screen">
-  <div class="wrap" style="max-width:640px; padding-top:56px;">
+  <div class="wrap" style="max-width:720px; padding-top:56px;">
     <p class="eyebrow">final results — round 6 complete</p>
     <h1 id="final-winner-banner">🏆 —</h1>
     <div id="final-leaderboard" style="margin-top:22px;"></div>
-    <button class="btn btn-gold btn-block" id="btn-reset" style="margin-top:20px;">Reset room &amp; play again</button>
+
+    <div class="card" style="margin-top:18px;">
+      <h3>Company Value by round</h3>
+      <canvas id="chart-value" height="220"></canvas>
+    </div>
+    <div class="card">
+      <h3>Price by round</h3>
+      <canvas id="chart-price" height="220"></canvas>
+    </div>
+    <div class="card">
+      <h3>Market price trend</h3>
+      <canvas id="chart-mp" height="180"></canvas>
+    </div>
+
+    <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">⬇️ Download match data (CSV)</button>
+    <button class="btn btn-gold btn-block" id="btn-reset" style="margin-top:10px;">Reset room &amp; play again</button>
   </div>
 </section>
 

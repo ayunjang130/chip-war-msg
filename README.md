@@ -54,16 +54,51 @@ for 30+ minutes, so long-running public deployments don't leak memory.
       Market Price, division-by-zero guards, Company Value
 - [x] Debt allowed (negative capital from investment or poor sales)
 - [x] Room codes, lobby, host dashboard (config, pause/resume/force-skip,
-      kick, reset), reconnection by teamId (including mid-results/game-over)
-- [x] Live "visible bluffing" ticker + negotiation chat channel
+      kick, reset, destroy), reconnection by teamId (incl. mid-results/game-over)
+- [x] Live "visible bluffing" ticker + moderated negotiation chat channel
 - [x] Hidden info: capital is only visible to its own team + the host
-- [x] Beginner onboarding: "How to Play" modal (auto-shown once, reopenable
-      via the `?` button) + inline plain-language hints on every control
+- [x] Beginner onboarding: "How to Play" modal + inline plain-language hints
 - [x] Optional AI bots (Tech/Capacity/Balanced) for solo/small-group testing
-      — a prototype convenience, not in the original design doc
-- [x] **Market Shocks** — one random modifier per round (see below)
-- [x] **Live purchase-rank preview** — real-time 🟢/🟡/🔴 badge under the
-      price box, computed with pure math (no AI, no delay)
+- [x] Market Shocks (procedural + optional AI) + live purchase-rank preview
+- [x] Team names shown everywhere alongside company names
+- [x] Upgrade costs escalate 1.5x per purchase; $5,000 starting budget
+- [x] Mid-match joins blocked with a clear message + Exit This Room
+- [x] Host: kick (with confirm), Destroy Room, live-editable settings
+- [x] Post-match charts (Company Value / Price / Market Price by round) +
+      one-click CSV export of the full match
+
+## Round timer / demand / market volatility now apply live
+
+Previously, changing "Apple demand per team" or "Round timer" only took
+effect if saved while still in the lobby - there was no way to touch them
+once a match started. `HOST_UPDATE_CONFIG` now applies those two fields
+(plus the new Market Volatility dial) immediately, at any phase, and the
+host's live-monitor screen has its own small "Live-adjustable settings"
+panel so there's actually a control to reach them mid-match. Everything
+else (scoring weights, max teams, Starting Budget, inflation rate) stays
+lobby-only, since changing those mid-match wouldn't make sense retroactively.
+
+## Advanced Settings — how the vaguer asks got mapped to concrete controls
+
+Three requested "difficulty knobs" (inflation, consumer price sensitivity,
+advertising efficiency) were specified only by name, not by formula. Rather
+than inventing three loosely-defined new systems, they were mapped to:
+
+- **Inflation rate per round** — a real new field. Compounds onto every
+  Tech/Capacity upgrade's base cost each round (on top of the existing
+  1.5x-per-purchase curve).
+- **Consumer price sensitivity** — this is just the existing **Price
+  weight (Wp)** slider. Turning it up makes price matter more in Apple's
+  purchase decision; no new field needed.
+- **Advertising efficiency / external-variable difficulty** — folded into
+  the new **Market Volatility** dial (0.5x-2.0x), which scales how far
+  *every* Market Shock swings away from neutral each round. This is the
+  cleanest single proxy for "how harsh are external forces this match"
+  without adding an unbalanced fourth stat for players to chase.
+
+"Market size" wasn't added as a separate field either - it's already the
+product of **Apple demand per team × number of teams (Max teams)**, both
+of which were already configurable.
 
 ## Market Shocks (anti-meta-lock system)
 
@@ -104,7 +139,16 @@ still-being-typed numbers, since those are already public via the ticker).
 It updates on every keystroke with zero network latency and is guaranteed
 to match what the real end-of-round resolution will do, because both call
 sites share the same effective-weights/effective-demand helpers that fold
-in the round's active shock.
+in the round's active shock (and now Market Volatility too).
+
+## Basic profanity filter
+
+`engine.containsProfanity()` is a plain word-list check (whole-word match
+on normalized text, so "class" never matches "ass"). A blocked message
+never reaches the chat log or other players — the sender gets a private
+"Message blocked" notice instead. It's intentionally simple: easy to
+bypass with creative spelling, good enough for the common case. Swap in a
+real moderation API later if stronger coverage matters.
 
 ## What to expand next
 
@@ -121,6 +165,6 @@ in the round's active shock.
 4. **Always-on hosting.** The free tier's cold-start delay is fine for
    casual use; for a scheduled big event, the ~$7/mo "always on" tier on
    most platforms removes it entirely.
-5. **Shock history recap.** The final results screen could list all 6
-   rounds' shocks in order — a nice debrief tool for a class discussion of
-   "what would you do differently."
+5. **Stronger moderation.** The profanity filter is a basic word list, not
+   an NLP system — fine for a classroom, but a real moderation API would
+   close the "creative misspelling" gap if this ever goes fully public.
