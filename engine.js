@@ -27,6 +27,13 @@ const CONFIG = Object.freeze({
 
   DEMAND_PER_TEAM: 200, // Apple RemainingDemand = teams.length * 200
 
+  // Anti-exploit guard (see calcMaxPrice below): when total supply is below
+  // total demand, EVERY team's full offer sells regardless of rank - so
+  // without a ceiling, pricing at $999,999 was pure free money. Capping at
+  // a generous multiple of the going rate keeps genuine premium-margin
+  // play alive while blocking the absurd case.
+  PRICE_CEILING_MULTIPLIER: 3,
+
   WEIGHTS_DEFAULT: Object.freeze({ price: 0.5, tech: 0.3, capacity: 0.2 }),
 
   ASSET_RATES: Object.freeze({
@@ -57,6 +64,18 @@ function calcProduction(capacityLevel, multiplier = 1) {
   const c = Math.max(0, Math.min(capacityLevel, CONFIG.CAPACITY_MAX));
   const m = Number.isFinite(multiplier) ? multiplier : 1;
   return Math.round(CONFIG.BASE_PRODUCTION + c * CONFIG.PRODUCTION_PER_LEVEL * m);
+}
+
+/**
+ * The highest price a team is allowed to set this round. Pegged to the
+ * last resolved round's Market Price (or a sane $50 default before round 1
+ * has one) x PRICE_CEILING_MULTIPLIER. A team can still legitimately price
+ * 2-3x the going rate for a high-margin/low-volume play - this only stops
+ * the "type a huge number and hope demand exceeds everyone's supply" case.
+ */
+function calcMaxPrice(referenceMarketPrice) {
+  const ref = referenceMarketPrice > 0 ? referenceMarketPrice : 50;
+  return Math.round(ref * CONFIG.PRICE_CEILING_MULTIPLIER);
 }
 
 /**
@@ -209,6 +228,9 @@ function pct(multiplier) {
 // 13 dramatic templates + Calm Market (weighted heavier so chaos isn't
 // constant). Magnitudes re-roll every time a template is picked, so even a
 // template repeating later in a long match reads a little differently.
+// Copy is written to be fun/vivid for a teenage audience while staying
+// mechanically clear - see summarizeShockImpact() for the plain-numbers
+// line shown right alongside every one of these.
 function getShockTemplates() {
   return [
     {
@@ -217,7 +239,7 @@ function getShockTemplates() {
       icon: '⚠️',
       build() {
         const m = roll(0.45, 0.75);
-        return { effects: { capacityProductionMultiplier: m }, description: `A component shortage cuts everyone's Capacity efficiency by ${pct(m)}% this round.` };
+        return { effects: { capacityProductionMultiplier: m }, description: `A key supplier just went dark. Everyone's Capacity efficiency takes a ${pct(m)}% hit this round.` };
       }
     },
     {
@@ -226,7 +248,7 @@ function getShockTemplates() {
       icon: '⚙️',
       build() {
         const m = roll(1.15, 1.45);
-        return { effects: { capacityProductionMultiplier: m }, description: `A new shipping route boosts Capacity efficiency by ${pct(m)}% this round.` };
+        return { effects: { capacityProductionMultiplier: m }, description: `A new shipping shortcut just opened up — Capacity efficiency jumps ${pct(m)}% this round!` };
       }
     },
     {
@@ -235,7 +257,7 @@ function getShockTemplates() {
       icon: '🍎',
       build() {
         const m = roll(1.5, 2.3);
-        return { effects: { weightBias: { tech: m } }, description: `Apple is prioritizing quality this round — Tech scores count for noticeably more.` };
+        return { effects: { weightBias: { tech: m } }, description: `Apple's engineers are obsessing over specs this round — Tech scores hit different.` };
       }
     },
     {
@@ -244,7 +266,7 @@ function getShockTemplates() {
       icon: '💵',
       build() {
         const m = roll(1.4, 2.0);
-        return { effects: { weightBias: { price: m } }, description: `Apple is watching every dollar this round — Price matters more than usual.` };
+        return { effects: { weightBias: { price: m } }, description: `Apple's CFO is on a cost-cutting rampage this round — Price just became king.` };
       }
     },
     {
@@ -253,7 +275,7 @@ function getShockTemplates() {
       icon: '🔧',
       build() {
         const m = roll(1.5, 2.2);
-        return { effects: { weightBias: { capacity: m } }, description: `Apple wants proof you can deliver at scale — Capacity counts for more this round.` };
+        return { effects: { weightBias: { capacity: m } }, description: `Apple wants proof you can actually deliver at scale — Capacity is the flex this round.` };
       }
     },
     {
@@ -262,7 +284,7 @@ function getShockTemplates() {
       icon: '📦',
       build() {
         const m = roll(0.55, 0.75);
-        return { effects: { demandMultiplier: m }, description: `Apple trimmed its forecast — total demand is down ${pct(m)}% this round.` };
+        return { effects: { demandMultiplier: m }, description: `Apple's warehouses are already stuffed — total demand shrinks ${pct(m)}% this round.` };
       }
     },
     {
@@ -271,7 +293,7 @@ function getShockTemplates() {
       icon: '🚨',
       build() {
         const m = roll(1.3, 1.75);
-        return { effects: { demandMultiplier: m }, description: `A surprise product launch means Apple needs ${pct(m)}% more chips this round.` };
+        return { effects: { demandMultiplier: m }, description: `A surprise hit product just sold out — Apple is scrambling for ${pct(m)}% more chips!` };
       }
     },
     {
@@ -280,7 +302,7 @@ function getShockTemplates() {
       icon: '🧠',
       build() {
         const m = roll(1.4, 1.9);
-        return { effects: { techUpgradeCostMultiplier: m }, description: `Engineers are hard to hire right now — Tech upgrades cost ${pct(m)}% more this round.` };
+        return { effects: { techUpgradeCostMultiplier: m }, description: `Rivals are poaching engineers left and right — Tech upgrades cost ${pct(m)}% more this round.` };
       }
     },
     {
@@ -289,7 +311,7 @@ function getShockTemplates() {
       icon: '🎓',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { techUpgradeCostMultiplier: m }, description: `A government grant cuts the cost of Tech upgrades by ${pct(m)}% this round.` };
+        return { effects: { techUpgradeCostMultiplier: m }, description: `A fat government grant just landed — Tech upgrades are ${pct(m)}% cheaper this round.` };
       }
     },
     {
@@ -298,7 +320,7 @@ function getShockTemplates() {
       icon: '🏗️',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { capacityUpgradeCostMultiplier: m }, description: `A regional subsidy cuts the cost of Capacity upgrades by ${pct(m)}% this round.` };
+        return { effects: { capacityUpgradeCostMultiplier: m }, description: `Free money from the local government — Capacity upgrades are ${pct(m)}% cheaper this round.` };
       }
     },
     {
@@ -307,7 +329,7 @@ function getShockTemplates() {
       icon: '🛃',
       build() {
         const m = roll(1.4, 1.9);
-        return { effects: { capacityUpgradeCostMultiplier: m }, description: `New equipment tariffs make Capacity upgrades ${pct(m)}% more expensive this round.` };
+        return { effects: { capacityUpgradeCostMultiplier: m }, description: `New tariffs just hit fab equipment — Capacity upgrades cost ${pct(m)}% more this round.` };
       }
     },
     {
@@ -316,7 +338,7 @@ function getShockTemplates() {
       icon: '🔍',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { weightBias: { tech: m } }, description: `A competitor's recall has buyers distracted — Tech matters a bit less this round.` };
+        return { effects: { weightBias: { tech: m } }, description: `A competitor just got caught cutting corners — buyers are distracted, Tech matters a bit less.` };
       }
     },
     {
@@ -325,11 +347,39 @@ function getShockTemplates() {
       icon: '💰',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { weightBias: { price: m } }, description: `Apple has extra budget slack this round — Price matters a bit less than usual.` };
+        return { effects: { weightBias: { price: m } }, description: `Apple found some spare change in the couch cushions — Price matters a little less this round.` };
       }
     },
-    { id: 'calm_market', title: NEUTRAL_SHOCK.title, icon: NEUTRAL_SHOCK.icon, weight: 4, build: () => ({ effects: {}, description: NEUTRAL_SHOCK.description }) }
+    { id: 'calm_market', title: NEUTRAL_SHOCK.title, icon: NEUTRAL_SHOCK.icon, weight: 4, build: () => ({ effects: {}, description: 'Nothing dramatic in the news today — standard rules apply.' }) }
   ];
+}
+
+/**
+ * Turns a shock's raw effects object into ONE short, plain-language line
+ * that always exactly matches the real numbers (auto-derived, never goes
+ * stale like hand-written flavor text could) - e.g. "Capacity payoff -42%
+ * · Tech upgrade cost +65%". Shown to every player, not just the host, so
+ * nobody has to reverse-engineer the flavor text to know what actually
+ * changed.
+ */
+function summarizeShockImpact(effects) {
+  if (!effects) return '';
+  const delta = (m) => Math.round(((m != null ? m : 1) - 1) * 100);
+  const fmt = (label, m) => {
+    const d = delta(m);
+    return d === 0 ? null : `${label} ${d > 0 ? '+' : ''}${d}%`;
+  };
+  const b = effects.weightBias || {};
+  const parts = [
+    fmt('Capacity payoff', effects.capacityProductionMultiplier),
+    fmt('Tech upgrade cost', effects.techUpgradeCostMultiplier),
+    fmt('Capacity upgrade cost', effects.capacityUpgradeCostMultiplier),
+    fmt('Apple demand', effects.demandMultiplier),
+    fmt('Price weight', b.price),
+    fmt('Tech weight', b.tech),
+    fmt('Capacity weight', b.capacity)
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'No numeric change this round.';
 }
 
 /** Clamp + validate a raw shock object from ANY source (template or AI JSON). */
@@ -471,6 +521,7 @@ module.exports = {
   normalizeWeights,
   calcProduction,
   calcUpgradeCost,
+  calcMaxPrice,
   calcTechScore,
   calcCapacityScore,
   calcPriceScores,
@@ -481,6 +532,7 @@ module.exports = {
   NEUTRAL_SHOCK,
   sanitizeShock,
   pickProceduralShock,
+  summarizeShockImpact,
   parseShockResponseText,
   getEffectiveWeights,
   getEffectiveDemandPerTeam,

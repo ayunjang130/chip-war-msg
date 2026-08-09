@@ -63,7 +63,15 @@ function createTeamState(teamId, teamName, companyName, socketId, startingCapita
     quantity: 0,
     locked: false,
     lockOrder: 0,
-    lastRoundPrice: 50
+    lastRoundPrice: 50,
+    // Snapshot of levels at the START of the current round + a stack of what
+    // was paid for each purchase made THIS round - together these are what
+    // let TEAM_UNDO_INVEST reverse only this round's buys, never eating
+    // into levels the team already owned before this round began.
+    roundStartTechLevel: 0,
+    roundStartCapacityLevel: 0,
+    techPurchasesThisRound: [],
+    capacityPurchasesThisRound: []
   };
 }
 
@@ -120,6 +128,8 @@ function publicTeam(team, viewerTeamId, isPrivileged, room) {
     locked: team.locked,
     nextTechCost: team.techLevel < engine.CONFIG.TECH_MAX ? roomUpgradeCost(room, 'tech', team.techLevel) : null,
     nextCapacityCost: team.capacityLevel < engine.CONFIG.CAPACITY_MAX ? roomUpgradeCost(room, 'capacity', team.capacityLevel) : null,
+    canUndoTech: (team.techPurchasesThisRound || []).length > 0,
+    canUndoCapacity: (team.capacityPurchasesThisRound || []).length > 0,
     capital: showCapital ? Math.round(team.capital) : null
   };
 }
@@ -140,6 +150,7 @@ function broadcastState(room) {
       timeLeft: room.timeLeft,
       paused: room.paused,
       marketPrice: room.marketPrice,
+      maxPrice: engine.calcMaxPrice(room.marketPrice),
       shock: publicShock(room.activeShock, false),
       preview: preview[viewer.teamId] || null,
       teams: teamList.map((t) => publicTeam(t, viewer.teamId, false, room))
@@ -153,6 +164,7 @@ function broadcastState(room) {
       timeLeft: room.timeLeft,
       paused: room.paused,
       marketPrice: room.marketPrice,
+      maxPrice: engine.calcMaxPrice(room.marketPrice),
       shock: publicShock(room.activeShock, true),
       teams: teamList.map((t) => publicTeam(t, null, true, room))
     });
@@ -183,7 +195,7 @@ function broadcastLobby(room) {
 
 function publicShock(shock, detailed) {
   if (!shock) return null;
-  const base = { title: shock.title, icon: shock.icon, description: shock.description, source: shock.source };
+  const base = { title: shock.title, icon: shock.icon, description: shock.description, source: shock.source, impact: engine.summarizeShockImpact(shock.effects) };
   return detailed ? { ...base, effects: shock.effects } : base;
 }
 
@@ -340,6 +352,12 @@ async function startRound(room) {
     const production = engine.calcProduction(team.capacityLevel, capMultiplier);
     team.inventory += production;
     team.locked = false;
+    // Fresh snapshot + ledger for this round's undo support - last round's
+    // purchases are already permanent, only THIS round's are reversible.
+    team.roundStartTechLevel = team.techLevel;
+    team.roundStartCapacityLevel = team.capacityLevel;
+    team.techPurchasesThisRound = [];
+    team.capacityPurchasesThisRound = [];
     // Default offer = everything you have. Resetting this to 0 every round
     // was a trap: players who only touched the Price field would silently
     // lock in a 0-quantity offer. Defaulting to "offer it all" means doing
@@ -449,6 +467,11 @@ function resolveRound(room) {
       team.locked = true;
       team.lockOrder = ++room.lockCounter;
     }
+    // Defensive re-clamp: UPDATE_INPUT already enforces this, but a value
+    // carried over from team.lastRoundPrice above could in principle be
+    // stale if the ceiling moved since - never let a locked price through
+    // above the cap.
+    team.price = Math.min(team.price, engine.calcMaxPrice(room.marketPrice));
   });
 
   const entries = Object.values(room.teams).map((t) => ({
@@ -639,13 +662,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // A player backing out of a room they haven't really started playing in
-  // yet. Restricted to the lobby - once a match is running, disconnect (tab
-  // close) is the supported way out, since a team mid-round has already
-  // affected production/history that shouldn't just vanish.
+  // A player backing out of a room. Allowed in the lobby (before a match
+  // starts) and after game_over (once it's fully done) - NOT mid-match,
+  // since a team mid-round has already affected production/history that
+  // shouldn't just vanish; disconnect (tab close) covers that case instead.
   socket.on('LEAVE_ROOM', ({ roomCode, teamId }) => {
     const room = rooms[roomCode];
-    if (!room || room.phase !== 'lobby') return;
+    if (!room || (room.phase !== 'lobby' && room.phase !== 'game_over')) return;
     if (teamId && room.teams[teamId]) {
       delete room.teams[teamId];
       delete socketMeta[socket.id];
@@ -663,7 +686,10 @@ io.on('connection', (socket) => {
     if (!team || team.locked || room.phase !== 'round_active') return;
     if (price != null) {
       const p = Number(price);
-      if (!Number.isNaN(p)) team.price = Math.max(0, p);
+      // Anti-exploit price ceiling: see engine.calcMaxPrice. Clamped here
+      // (not just validated) so a submitted value can never exceed it,
+      // even from a modified client.
+      if (!Number.isNaN(p)) team.price = Math.max(0, Math.min(p, engine.calcMaxPrice(room.marketPrice)));
     }
     if (quantity != null) {
       const q = Number(quantity);
@@ -683,11 +709,35 @@ io.on('connection', (socket) => {
       const cost = roomUpgradeCost(room, 'tech', team.techLevel);
       team.techLevel += 1;
       team.capital -= cost;
+      team.techPurchasesThisRound = team.techPurchasesThisRound || [];
+      team.techPurchasesThisRound.push(cost);
     } else if (kind === 'capacity' && team.capacityLevel < engine.CONFIG.CAPACITY_MAX) {
       const cost = roomUpgradeCost(room, 'capacity', team.capacityLevel);
       team.capacityLevel += 1;
       team.capital -= cost;
+      team.capacityPurchasesThisRound = team.capacityPurchasesThisRound || [];
+      team.capacityPurchasesThisRound.push(cost);
     }
+    broadcastState(room);
+  });
+
+  // Undo one Tech/Capacity purchase made THIS round only - a convenience,
+  // not a strategy tool. Once LOCK_IN happens, purchases become permanent
+  // (the purchases-this-round ledger gets wiped at the next round start
+  // regardless), so there is no way to undo anything from a past round.
+  socket.on('TEAM_UNDO_INVEST', ({ roomCode, teamId, kind }) => {
+    const room = rooms[roomCode];
+    if (!room) return;
+    const team = room.teams[teamId];
+    if (!team || team.locked || room.phase !== 'round_active') return;
+    const ledger = kind === 'tech' ? team.techPurchasesThisRound : team.capacityPurchasesThisRound;
+    const roundStartLevel = kind === 'tech' ? team.roundStartTechLevel : team.roundStartCapacityLevel;
+    const currentLevel = kind === 'tech' ? team.techLevel : team.capacityLevel;
+    if (!ledger || ledger.length === 0 || currentLevel <= roundStartLevel) return;
+    const refund = ledger.pop();
+    team.capital += refund;
+    if (kind === 'tech') team.techLevel -= 1;
+    else team.capacityLevel -= 1;
     broadcastState(room);
   });
 

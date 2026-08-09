@@ -92,6 +92,7 @@
       <div>
         <div class="title" id="shock-title">—</div>
         <div class="desc" id="shock-desc">—</div>
+        <div class="impact" id="shock-impact">—</div>
       </div>
     </div>
 
@@ -105,20 +106,22 @@
             <div class="levels" id="tech-dots"></div>
             <div class="name"><b>Technology</b><span>Lv <span id="tech-level">0</span>/5 · next upgrade $<span id="tech-cost">2,000</span> · improves purchase priority now</span></div>
             <button class="btn btn-sm" id="btn-buy-tech">Buy</button>
+            <button class="btn-undo" id="btn-undo-tech" title="Undo this round's Tech purchases">Undo</button>
           </div>
           <div class="upgrade-row">
             <div class="levels" id="cap-dots"></div>
             <div class="name"><b>Capacity</b><span>Lv <span id="cap-level">0</span>/5 · next upgrade $<span id="cap-cost">1,500</span> · boosts production next round</span></div>
             <button class="btn btn-sm" id="btn-buy-cap">Buy</button>
+            <button class="btn-undo" id="btn-undo-cap" title="Undo this round's Capacity purchases">Undo</button>
           </div>
-          <div class="inline-hint">💡 Tech raises your score right away. Capacity gives you more chips to sell starting <b style="color:var(--ink)">next</b> round. Both are permanent — no refunds. Each upgrade makes the next one 1.5x more expensive.</div>
+          <div class="inline-hint">💡 Tech raises your score right away. Capacity gives you more chips to sell starting <b style="color:var(--ink)">next</b> round. Both are permanent once you Lock In — no refunds — but you can Undo a purchase from this round any time before then. Each upgrade makes the next one 1.5x more expensive.</div>
         </div>
 
         <div class="card">
           <h3>Pricing &amp; offer</h3>
           <div class="two-col">
             <div class="field">
-              <label for="in-price">Selling price ($/chip)</label>
+              <label for="in-price">Selling price ($/chip) <span id="price-cap-hint" style="text-transform:none; letter-spacing:0; color:var(--ink-dim);"></span></label>
               <input id="in-price" type="number" min="1" step="1">
             </div>
             <div class="field">
@@ -165,6 +168,7 @@
       <div>
         <div class="title" id="res-shock-title">—</div>
         <div class="desc" id="res-shock-desc">This round's market shock.</div>
+        <div class="impact" id="res-shock-impact">—</div>
       </div>
     </div>
     <p class="inline-hint">Apple bought from the highest-scoring sellers first (best mix of low price + high tech + high capacity) until it ran out of demand for the round. Anything unsold rolls over to next round.</p>
@@ -200,6 +204,7 @@
     </div>
 
     <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">⬇️ Download match data (CSV)</button>
+    <button class="btn btn-block" id="btn-leave-room-final" style="margin-top:10px;">Leave Room</button>
     <div class="center-msg">Ask your host to start a new match when ready.</div>
   </div>
 </section>
@@ -232,8 +237,18 @@
 
     <div class="howto-formula">⚡ Each round also gets one random <b style="color:var(--ink)">Market Shock</b> shown at the top of the screen (e.g. "Capacity efficiency -40%" or "Apple values Tech 2x this round"). It changes the rules just for that round, so the exact same strategy won't win every match.</div>
 
+    <div class="howto-formula">Prices can't go above 3x the last Market Price — plenty of room for a premium play, just no typing in a million dollars. Bought a Tech/Capacity level you didn't mean to? Hit <b style="color:var(--ink)">Undo</b> any time before you Lock In.</div>
+
     <div class="howto-formula">Tip: cheap pricing alone won't win — a rival with better Tech or Capacity can out-score you even at a higher price. There's no single best strategy.</div>
     <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Got it, let's play</button>
+  </div>
+</div>
+
+<div class="celebration-overlay" id="celebration-overlay">
+  <div id="money-rain"></div>
+  <div class="celebration-banner">
+    <h2 id="celebration-title">🎉 You're #1 this round!</h2>
+    <p id="celebration-sub">$0 revenue</p>
   </div>
 </div>
 

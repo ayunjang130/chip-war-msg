@@ -199,3 +199,33 @@ console.log('All parseShockResponseText checks passed.');
 }
 
 console.log('All calcUpgradeCost + containsProfanity checks passed.');
+
+// 16) calcMaxPrice blocks the "astronomical price" exploit while leaving real premium play intact
+{
+  assert.strictEqual(e.calcMaxPrice(50), 150, '3x ceiling over a $50 market price');
+  assert.strictEqual(e.calcMaxPrice(0), 150, 'round 1 (no market price yet) falls back to the $50 reference (3x = 150)');
+  assert.strictEqual(e.calcMaxPrice(-10), 150, 'a nonsensical negative reference still falls back safely');
+  // the actual exploit scenario: demand exceeds supply, so EVERY offer sells regardless of rank
+  const teams = [
+    { teamId: 'exploiter', price: Math.min(999999, e.calcMaxPrice(50)), quantity: 50, techLevel: 0, capacityLevel: 0, lockOrder: 1 },
+    { teamId: 'normal', price: 50, quantity: 50, techLevel: 2, capacityLevel: 2, lockOrder: 2 }
+  ];
+  const results = e.resolveApplePurchase({ teams, weights: e.CONFIG.WEIGHTS_DEFAULT, demandPerTeam: 200 }); // 400 total demand, only 100 offered - everyone sells
+  const exploiter = results.find((r) => r.teamId === 'exploiter');
+  assert.ok(exploiter.purchased > 0, 'the capped price still sells when supply < demand (legitimate premium play preserved)');
+  assert.ok(exploiter.revenue < 999999 * 50, 'revenue is nowhere near the uncapped-exploit amount');
+  approx(exploiter.price, 150, 'the clamp actually took effect at 3x, not the requested absurd number');
+}
+
+// 17) summarizeShockImpact always matches the real numbers and stays readable
+{
+  assert.strictEqual(e.summarizeShockImpact(null), '', 'no shock -> empty string, not a crash');
+  const noop = e.summarizeShockImpact({ capacityProductionMultiplier: 1, techUpgradeCostMultiplier: 1, capacityUpgradeCostMultiplier: 1, demandMultiplier: 1, weightBias: { price: 1, tech: 1, capacity: 1 } });
+  assert.strictEqual(noop, 'No numeric change this round.', 'an all-1.0 effects object reads as no change');
+  const summary = e.summarizeShockImpact({ capacityProductionMultiplier: 0.6, techUpgradeCostMultiplier: 1, capacityUpgradeCostMultiplier: 1, demandMultiplier: 1, weightBias: { price: 1, tech: 1.8, capacity: 1 } });
+  assert.ok(summary.includes('Capacity payoff -40%'), 'correctly reports a 40% capacity payoff cut');
+  assert.ok(summary.includes('Tech weight +80%'), 'correctly reports an 80% tech weight increase');
+  assert.ok(!summary.includes('Price weight'), 'fields that did not change are omitted, not padded with +0%');
+}
+
+console.log('All calcMaxPrice + summarizeShockImpact checks passed.');

@@ -73,7 +73,7 @@
     $('shock-icon').textContent = shock.icon || '⚡';
     $('shock-title').textContent = shock.title;
     $('shock-desc').textContent = shock.description;
-    $('shock-effects').textContent = summarizeEffects(shock.effects);
+    $('shock-effects').textContent = (shock.impact || '') + '  |  raw: ' + summarizeEffects(shock.effects);
   }
 
   // ---------- setup screen ----------
@@ -197,7 +197,7 @@
       const row = document.createElement('div');
       row.className = 'pill';
       row.style.justifyContent = 'flex-start';
-      const label = t.teamName && t.teamName !== t.companyName ? escapeHtml(t.companyName) + ' <span class="hint-text">(' + escapeHtml(t.teamName) + ')</span>' : escapeHtml(t.companyName);
+      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
         '<span style="flex:1">' + label + '</span>' +
@@ -224,7 +224,7 @@
     body.innerHTML = '';
     payload.teams.forEach((t) => {
       const tr = document.createElement('tr');
-      const label = t.teamName && t.teamName !== t.companyName ? escapeHtml(t.companyName) + ' <span class="hint-text">(' + escapeHtml(t.teamName) + ')</span>' : escapeHtml(t.companyName);
+      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
       tr.innerHTML =
         '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' 🤖' : '') + '</td>' +
         '<td>' + (t.locked ? '🔒' : '⏳') + '</td>' +
@@ -259,7 +259,7 @@
     body.innerHTML = '';
     payload.results.forEach((r) => {
       const tr = document.createElement('tr');
-      const label = r.teamName && r.teamName !== r.companyName ? escapeHtml(r.companyName) + ' <span class="hint-text">(' + escapeHtml(r.teamName) + ')</span>' : escapeHtml(r.companyName);
+      const label = '<b style="font-family:var(--display);">' + escapeHtml(r.teamName || r.companyName) + '</b> <span class="hint-text">(' + escapeHtml(r.companyName) + ')</span>';
       tr.innerHTML =
         '<td style="color:' + colorFor(r.teamId) + '">' + label + '</td>' +
         '<td>$' + r.price + '</td>' +
@@ -271,16 +271,16 @@
   }
 
   function renderGameOver(payload) {
-    $('final-winner-banner').textContent = payload.winner ? '🏆 ' + payload.winner.companyName + ' wins' : 'Game over';
+    $('final-winner-banner').textContent = payload.winner ? '🏆 ' + (payload.winner.teamName || payload.winner.companyName) + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
     payload.leaderboard.forEach((t, idx) => {
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
-      const nameLine = escapeHtml(t.companyName) + (t.teamName && t.teamName !== t.companyName ? ' <span class="hint-text" style="font-family:var(--body); font-weight:400;">(' + escapeHtml(t.teamName) + ')</span>' : '');
+      const nameLine = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text" style="font-weight:400;">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<div class="rank">' + (idx + 1) + '</div>' +
-        '<div class="name"><b>' + nameLine + '</b>' +
+        '<div class="name">' + nameLine +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' · tech Lv' + t.techLevel + ' · capacity Lv' + t.capacityLevel + '</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
       el.appendChild(row);

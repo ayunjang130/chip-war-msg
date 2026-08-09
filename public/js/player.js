@@ -8,7 +8,9 @@
   let myRoomCode = null;
   let myTeamId = null;
   let selectedCompany = null;
-  let lastTicker = {}; // teamId -> "price:quantity" for flash-on-change
+  let lastTicker = {}; // teamId -> "price:quantity" for whole-card flash-on-change
+  let lastPriceByTeam = {}; // teamId -> last seen price, for per-value pop + direction arrow
+  let lastQtyByTeam = {}; // teamId -> last seen quantity, same idea
   let priceTimer = null;
   let lastHistory = []; // full round-by-round data from the last completed match, for charts + CSV
   let charts = {};
@@ -117,7 +119,8 @@
       const row = document.createElement('div');
       row.className = 'pill';
       row.style.justifyContent = 'flex-start';
-      const label = t.teamName && t.teamName !== t.companyName ? escapeHtml(t.companyName) + ' <span class="hint-text">(' + escapeHtml(t.teamName) + ')</span>' : escapeHtml(t.companyName);
+      row.style.alignItems = 'center';
+      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
         '<span>' + label + (t.teamId === myTeamId ? ' (me)' : '') + '</span>' +
@@ -128,6 +131,18 @@
   }
 
   // ---------- ticker ----------
+  function valueHtml(id, value, lastMap) {
+    const prev = lastMap[id];
+    let cls = '';
+    let arrow = '';
+    if (prev != null && prev !== value) {
+      const up = value > prev;
+      cls = ' pop ' + (up ? 'up' : 'down');
+      arrow = '<span class="value-arrow ' + (up ? 'up">▲' : 'down">▼') + '</span>';
+    }
+    lastMap[id] = value;
+    return '<span class="flash-value' + cls + '">' + value + '</span>' + arrow;
+  }
   function renderTicker(teams) {
     const el = $('ticker');
     el.innerHTML = '';
@@ -135,14 +150,16 @@
       const key = t.price + ':' + t.quantity;
       const changed = lastTicker[t.teamId] != null && lastTicker[t.teamId] !== key;
       lastTicker[t.teamId] = key;
+      const priceHtml = valueHtml(t.teamId, t.price, lastPriceByTeam);
+      const qtyHtml = valueHtml(t.teamId, t.quantity, lastQtyByTeam);
       const card = document.createElement('div');
       card.className = 'ticker-card' + (changed ? ' flash' : '') + (!t.connected && !t.isBot ? ' offline' : '');
       card.style.setProperty('border-left', '3px solid ' + colorFor(t.teamId));
       card.innerHTML =
-        '<div class="co">' + escapeHtml(t.companyName) + (t.teamId === myTeamId ? ' ★' : '') + '<span class="lock">' + (t.locked ? '🔒' : '⏳') + '</span></div>' +
-        (t.teamName && t.teamName !== t.companyName ? '<div class="row" style="margin-top:-3px;"><span style="opacity:.7;">' + escapeHtml(t.teamName) + '</span></div>' : '') +
-        '<div class="row"><span>Price</span><b>$' + t.price + '</b></div>' +
-        '<div class="row"><span>Qty</span><b>' + t.quantity + '</b></div>' +
+        '<div class="co">' + escapeHtml(t.teamName || t.companyName) + (t.teamId === myTeamId ? ' ★' : '') + '<span class="lock">' + (t.locked ? '🔒' : '⏳') + '</span></div>' +
+        '<div class="sub">' + escapeHtml(t.companyName) + '</div>' +
+        '<div class="row"><span>Price</span><b>$' + priceHtml + '</b></div>' +
+        '<div class="row"><span>Qty</span><b>' + qtyHtml + '</b></div>' +
         '<div class="row"><span>Tech / Cap</span><b>Lv' + t.techLevel + ' / Lv' + t.capacityLevel + '</b></div>';
       el.appendChild(card);
     });
@@ -165,6 +182,7 @@
     $('shock-icon').textContent = shock.icon || '⚡';
     $('shock-title').textContent = shock.title;
     $('shock-desc').textContent = shock.description;
+    $('shock-impact').textContent = shock.impact || 'No numeric change this round.';
   }
   function renderRankPreview(preview) {
     const el = $('rank-preview');
@@ -217,10 +235,16 @@
     $('btn-buy-cap').disabled = me.locked || me.capacityLevel >= 5;
     $('btn-buy-tech').textContent = me.techLevel >= 5 ? 'Maxed' : 'Buy ($' + (me.nextTechCost || 0).toLocaleString() + ')';
     $('btn-buy-cap').textContent = me.capacityLevel >= 5 ? 'Maxed' : 'Buy ($' + (me.nextCapacityCost || 0).toLocaleString() + ')';
+    $('btn-undo-tech').disabled = me.locked || !me.canUndoTech;
+    $('btn-undo-cap').disabled = me.locked || !me.canUndoCapacity;
 
     const priceInput = $('in-price');
     const qtyInput = $('in-qty');
     qtyInput.max = me.inventory;
+    if (payload.maxPrice) {
+      priceInput.max = payload.maxPrice;
+      $('price-cap-hint').textContent = '(cap: $' + payload.maxPrice.toLocaleString() + ')';
+    }
     if (document.activeElement !== priceInput) priceInput.value = me.price;
     if (document.activeElement !== qtyInput) qtyInput.value = me.quantity;
     priceInput.disabled = me.locked;
@@ -266,6 +290,7 @@
       $('res-shock-icon').textContent = payload.shock.icon || '⚡';
       $('res-shock-title').textContent = payload.shock.title;
       $('res-shock-desc').textContent = payload.shock.description;
+      $('res-shock-impact').textContent = payload.shock.impact || 'No numeric change this round.';
     } else {
       shockEl.style.display = 'none';
     }
@@ -275,8 +300,9 @@
       const tr = document.createElement('tr');
       if (r.teamId === myTeamId) tr.classList.add('me');
       if (idx === 0) tr.classList.add('winner');
+      const nameCell = '<b style="font-family:var(--display);">' + escapeHtml(r.teamName || r.companyName) + '</b> <span class="hint-text">(' + escapeHtml(r.companyName) + ')</span>';
       tr.innerHTML =
-        '<td>' + escapeHtml(r.companyName) + (r.teamName && r.teamName !== r.companyName ? ' <span class="hint-text">(' + escapeHtml(r.teamName) + ')</span>' : '') + '</td>' +
+        '<td>' + nameCell + '</td>' +
         '<td>$' + r.price + '</td>' +
         '<td>' + r.quantitySold + '</td>' +
         '<td>' + money(r.revenue) + '</td>' +
@@ -286,19 +312,46 @@
       body.appendChild(tr);
     });
     $('res-waiting-msg').textContent = payload.isFinalRound ? 'Calculating final results…' : 'Next round starts automatically — hang tight…';
+
+    if (payload.results.length && payload.results[0].teamId === myTeamId && payload.results[0].revenue > 0) {
+      triggerCelebration(payload.results[0].revenue);
+    }
+  }
+
+  // ---------- round-winner celebration ----------
+  function triggerCelebration(revenue) {
+    const overlay = $('celebration-overlay');
+    const rain = $('money-rain');
+    rain.innerHTML = '';
+    const emojis = ['💵', '💰', '🤑'];
+    for (let i = 0; i < 26; i++) {
+      const span = document.createElement('span');
+      span.className = 'money-emoji';
+      span.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+      span.style.left = Math.random() * 100 + '%';
+      span.style.animationDuration = 1.6 + Math.random() * 1.4 + 's';
+      span.style.animationDelay = Math.random() * 0.6 + 's';
+      rain.appendChild(span);
+    }
+    $('celebration-sub').textContent = money(revenue) + ' revenue — best in the round!';
+    overlay.classList.add('active');
+    setTimeout(() => {
+      overlay.classList.remove('active');
+      rain.innerHTML = '';
+    }, 3200);
   }
 
   function renderGameOver(payload) {
-    $('final-winner-banner').textContent = payload.winner ? '🏆 ' + payload.winner.companyName + ' wins' : 'Game over';
+    $('final-winner-banner').textContent = payload.winner ? '🏆 ' + (payload.winner.teamName || payload.winner.companyName) + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
     payload.leaderboard.forEach((t, idx) => {
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
-      const nameLine = escapeHtml(t.companyName) + (t.teamName && t.teamName !== t.companyName ? ' <span class="hint-text" style="font-family:var(--body); font-weight:400;">(' + escapeHtml(t.teamName) + ')</span>' : '');
+      const nameLine = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text" style="font-weight:400;">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<div class="rank">' + (idx + 1) + '</div>' +
-        '<div class="name"><b>' + nameLine + '</b>' +
+        '<div class="name">' + nameLine +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' (+' + money(t.inventory * 10) + ') · tech Lv' + t.techLevel + ' (+' + money(t.techLevel * 500) + ') · capacity Lv' + t.capacityLevel + ' (+' + money(t.capacityLevel * 500) + ')</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
       el.appendChild(row);
@@ -432,6 +485,8 @@
   ['in-roomcode', 'in-teamname'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); }));
   $('btn-buy-tech').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
   $('btn-buy-cap').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
+  $('btn-undo-tech').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
+  $('btn-undo-cap').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
   $('in-price').addEventListener('input', sendInputUpdate);
   $('in-qty').addEventListener('input', sendInputUpdate);
   $('btn-lockin').addEventListener('click', () => {
@@ -446,14 +501,16 @@
   });
   $('btn-chat-send').addEventListener('click', sendChat);
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
-  $('btn-leave-room').addEventListener('click', () => {
-    if (!confirm('Leave this room? You can rejoin later with the same code.')) return;
+  function leaveRoom() {
+    if (!confirm('Leave this room?')) return;
     socket.emit('LEAVE_ROOM', { roomCode: myRoomCode, teamId: myTeamId });
     forgetSession();
     $('in-roomcode').value = '';
     $('in-teamname').value = '';
     activateScreen('screen-join');
-  });
+  }
+  $('btn-leave-room').addEventListener('click', leaveRoom);
+  $('btn-leave-room-final').addEventListener('click', leaveRoom);
   $('btn-exit-blocked').addEventListener('click', () => {
     $('in-roomcode').value = '';
     activateScreen('screen-join');

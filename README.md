@@ -60,12 +60,45 @@ for 30+ minutes, so long-running public deployments don't leak memory.
 - [x] Beginner onboarding: "How to Play" modal + inline plain-language hints
 - [x] Optional AI bots (Tech/Capacity/Balanced) for solo/small-group testing
 - [x] Market Shocks (procedural + optional AI) + live purchase-rank preview
-- [x] Team names shown everywhere alongside company names
+- [x] Team names shown bold, above the cosmetic company name, everywhere
 - [x] Upgrade costs escalate 1.5x per purchase; $5,000 starting budget
 - [x] Mid-match joins blocked with a clear message + Exit This Room
 - [x] Host: kick (with confirm), Destroy Room, live-editable settings
 - [x] Post-match charts (Company Value / Price / Market Price by round) +
       one-click CSV export of the full match
+- [x] Price ceiling (3x last Market Price) blocks the "type an absurd
+      number" exploit while leaving real premium pricing intact
+- [x] Undo a Tech/Capacity purchase from the current round, any time
+      before Lock In
+- [x] Leave Room available after game_over, not just from the lobby
+- [x] Real-time price/quantity changes pop + flash a direction arrow on
+      the ticker, not just a generic card highlight
+- [x] Market Shock banner redesigned to stand out (glow, entrance
+      animation, plain-language "impact" line alongside the flavor text)
+- [x] Round-winner celebration (money animation + banner) for whichever
+      team earned the most revenue that round
+
+## Price ceiling — the anti-exploit fix
+
+The purchase algorithm ranks sellers by score, but when total supply is
+*below* total demand, every team's full offer sells regardless of rank -
+so a price of $999,999 used to be pure free money as long as nobody
+undercut total demand. `engine.calcMaxPrice()` now caps every submitted
+price at `PRICE_CEILING_MULTIPLIER` (3x, in `engine.js`) times the last
+resolved round's Market Price (or $50 before round 1 has one). The server
+clamps this on every keystroke (`UPDATE_INPUT`) and again defensively at
+resolution time, so it can't be bypassed from a modified client either.
+3x still leaves real room for a genuine "raise the price, take the margin
+hit on volume" strategy - it only blocks the absurd end of the range.
+
+## Undo (this round only)
+
+Each team's `roundStartTechLevel`/`roundStartCapacityLevel` are snapshotted
+the moment a round starts, and every purchase made during the round is
+pushed onto a small per-team ledger with its exact cost. `TEAM_UNDO_INVEST`
+pops the last entry, refunds it, and drops the level by one - but only
+down to that round's starting level, and only before Lock In. Anything
+from a previous round is already permanent and cannot be undone.
 
 ## Round timer / demand / market volatility now apply live
 
