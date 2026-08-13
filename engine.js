@@ -25,7 +25,15 @@ const CONFIG = Object.freeze({
   CAPACITY_MAX: 5, // Developer note: Cmax fixed at 5
   Q_BASE: 0, // Developer note: Qbase fixed at 0
 
-  DEMAND_PER_TEAM: 200, // Apple RemainingDemand = teams.length * 200
+  // Default demand pool per team. Deliberately LOWER than the free
+  // production floor (BASE_PRODUCTION=100/round) on purpose: with 70 units
+  // of demand per team but at least 100 units of supply per team, total
+  // industry supply outstrips total demand by default, so Competitive
+  // Score actually decides who sells and who doesn't - instead of demand
+  // being so generous that nearly everyone sells everything regardless of
+  // rank. Total Apple Demand is always DEMAND_PER_TEAM x number of teams
+  // (see resolveApplePurchase) - never hardcoded per team-count.
+  DEMAND_PER_TEAM: 70,
 
   // Anti-exploit guard (see calcMaxPrice below): when total supply is below
   // total demand, EVERY team's full offer sells regardless of rank - so

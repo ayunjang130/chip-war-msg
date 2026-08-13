@@ -77,6 +77,28 @@ for 30+ minutes, so long-running public deployments don't leak memory.
       animation, plain-language "impact" line alongside the flavor text)
 - [x] Round-winner celebration (money animation + banner) for whichever
       team earned the most revenue that round
+- [x] Default Apple demand per team is 70 (was 200) - deliberately below
+      the free production floor (100/round) so scarcity, and therefore
+      Competitive Score, is real by default instead of everyone selling out
+- [x] Total Apple Demand (demand/team × team count) shown live to BOTH the
+      host and every player - no one has to look at the host screen to
+      understand how big the market they're competing for actually is
+- [x] Player screen decluttered: long always-visible explanation
+      paragraphs replaced with small ⓘ tooltips (hover on desktop, tap on
+      touch); the buttons and live numbers are what's left on screen
+- [x] "How to Play" rewritten as 4 short, complete-sentence steps instead
+      of a stack of loosely-related paragraphs
+
+## Total Apple Demand — visible without the host screen
+
+Every `STATE_SYNC` a player receives now includes `demandPerTeam` (this
+round's effective per-team demand, already adjusted for any active shock)
+and `totalDemand` (that x the number of teams). The player round-header
+shows it directly, with a tooltip explaining the mechanic in one sentence -
+so reasoning about "how much can I realistically sell" no longer requires
+peeking at `/host`. The host's lobby and live-monitor screens show the
+same number, computed the same way, so host and players are always looking
+at consistent figures.
 
 ## Price ceiling — the anti-exploit fix
 

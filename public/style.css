@@ -239,3 +239,25 @@ tr.winner td:first-child{ color: var(--gold); }
 .celebration-banner p{ color:var(--ink); font-family:var(--mono); font-size:15px; margin-top:8px; }
 .money-emoji{ position:absolute; top:-48px; font-size:28px; z-index:1; animation-name:moneyFall; animation-timing-function:linear; animation-fill-mode:forwards; }
 @keyframes moneyFall{ 0%{ transform:translateY(0) rotate(0deg); opacity:1; } 100%{ transform:translateY(105vh) rotate(360deg); opacity:0.85; } }
+
+/* ---------- info tooltip (hover on desktop, tap on touch) ---------- */
+.info-tip{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:15px; height:15px; border-radius:50%; background:var(--panel-2); border:1px solid var(--line);
+  color:var(--ink-dim); font-family:var(--mono); font-size:10px; font-weight:700; cursor:help;
+  position:relative; margin-left:5px; flex-shrink:0; vertical-align:middle; user-select:none;
+}
+.info-tip::after{
+  content: attr(data-tip);
+  position:absolute; bottom:calc(100% + 9px); left:50%; transform:translateX(-50%);
+  background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:9px 11px;
+  font-family:var(--body); font-size:11.5px; font-weight:400; color:var(--ink); white-space:normal;
+  width:210px; text-align:left; line-height:1.5; opacity:0; pointer-events:none;
+  transition:opacity .12s ease; box-shadow:0 10px 24px rgba(0,0,0,0.45); z-index:35;
+}
+.info-tip:hover::after, .info-tip.show::after{ opacity:1; }
+.info-tip.show::after{ pointer-events:auto; }
+h3 .info-tip{ text-transform:none; letter-spacing:0; }
+
+/* ---------- compact header stat (e.g. Apple demand) ---------- */
+.round-header .block.stat-tip{ display:flex; align-items:center; }

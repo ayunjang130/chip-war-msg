@@ -7,6 +7,7 @@
   let lastPhase = 'lobby';
   let lastHistory = [];
   let charts = {};
+  let currentTeamCount = 0; // kept in sync from LOBBY_UPDATE/STATE_SYNC, used for the Total Apple Demand preview
 
   const $ = (id) => document.getElementById(id);
   function money(n) {
@@ -122,7 +123,21 @@
     if (document.activeElement !== $('live-cfg-timer')) $('live-cfg-timer').value = config.roundTimerSeconds;
     if (document.activeElement !== $('live-cfg-volatility')) $('live-cfg-volatility').value = config.marketVolatility;
     updateWeightHint();
+    updateTotalDemandHints();
   }
+
+  // Total Apple Demand = Apple demand per team x number of teams - never a
+  // number specific to one team-count, always recomputed from whatever is
+  // currently in the inputs and however many teams have actually joined.
+  function updateTotalDemandHints() {
+    const perTeam = Number($('cfg-demand').value) || 0;
+    const total = perTeam * currentTeamCount;
+    $('total-demand-hint').textContent = 'Total Apple demand: ' + total.toLocaleString() + ' (' + perTeam + ' × ' + currentTeamCount + (currentTeamCount === 1 ? ' team)' : ' teams)');
+    const livePerTeam = Number($('live-cfg-demand').value) || perTeam;
+    $('live-total-demand-hint').textContent = 'Total: ' + (livePerTeam * currentTeamCount).toLocaleString() + ' (' + livePerTeam + ' × ' + currentTeamCount + ')';
+  }
+  $('cfg-demand').addEventListener('input', updateTotalDemandHints);
+  $('live-cfg-demand').addEventListener('input', updateTotalDemandHints);
 
   function updateWeightHint() {
     const sum = (Number($('cfg-wp').value) || 0) + (Number($('cfg-wt').value) || 0) + (Number($('cfg-wc').value) || 0);
@@ -191,6 +206,8 @@
   function renderTeamList(payload) {
     $('team-count').textContent = payload.teams.length;
     $('team-max').textContent = payload.config.maxTeams;
+    currentTeamCount = payload.teams.length;
+    updateTotalDemandHints();
     const list = $('team-list');
     list.innerHTML = '';
     payload.teams.forEach((t) => {
@@ -219,6 +236,8 @@
   function renderLiveTable(payload) {
     $('live-round').textContent = payload.round;
     $('live-mp').textContent = payload.marketPrice ? payload.marketPrice.toFixed(0) : '—';
+    if (payload.totalDemand != null) $('live-demand').textContent = payload.totalDemand.toLocaleString();
+    currentTeamCount = payload.teams.length;
     renderShock(payload.shock);
     const body = $('live-table-body');
     body.innerHTML = '';

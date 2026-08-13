@@ -212,6 +212,14 @@
     $('hdr-round').textContent = payload.round;
     $('hdr-total-rounds').textContent = payload.totalRounds;
     $('hdr-mp').textContent = payload.marketPrice ? payload.marketPrice.toFixed(0) : '—';
+    if (payload.totalDemand != null) {
+      $('hdr-demand').textContent = payload.totalDemand.toLocaleString();
+      const teamCount = payload.teams.length;
+      $('hdr-demand').parentElement.querySelector('.info-tip').setAttribute(
+        'data-tip',
+        'Apple buys ' + payload.totalDemand.toLocaleString() + ' chips total this round (' + payload.demandPerTeam + ' × ' + teamCount + ' teams), split across everyone. Highest-scoring sellers get filled first — the rest can sell zero.'
+      );
+    }
     renderShock(payload.shock);
 
     renderTicker(payload.teams);
@@ -252,9 +260,7 @@
 
     $('btn-lockin').disabled = me.locked;
     $('btn-lockin').textContent = me.locked ? 'Locked in' : 'Lock In';
-    $('lockin-status').textContent = me.locked
-      ? '🔒 Locked in — waiting for other teams…'
-      : "Locking in freezes your price and quantity for this round — you can't undo it.";
+    $('lockin-status').textContent = me.locked ? '🔒 Locked in — waiting for other teams…' : 'Final once locked in.';
     renderRankPreview(payload.phase === 'round_active' ? payload.preview : null);
   }
 
@@ -556,6 +562,20 @@
     alert(reason || 'You were removed from this room.');
     forgetSession();
     activateScreen('screen-join');
+  });
+
+  // Tooltips open on hover on desktop; on touch devices, tap to toggle,
+  // tap anywhere else to close. Delegated so it also covers the header's
+  // Apple-demand tooltip, whose text is rewritten dynamically.
+  document.addEventListener('click', (e) => {
+    const tip = e.target.closest('.info-tip');
+    if (tip) {
+      e.stopPropagation();
+      document.querySelectorAll('.info-tip.show').forEach((o) => { if (o !== tip) o.classList.remove('show'); });
+      tip.classList.toggle('show');
+    } else {
+      document.querySelectorAll('.info-tip.show').forEach((o) => o.classList.remove('show'));
+    }
   });
 
   renderCompanyOptions();

@@ -229,3 +229,44 @@ console.log('All calcUpgradeCost + containsProfanity checks passed.');
 }
 
 console.log('All calcMaxPrice + summarizeShockImpact checks passed.');
+
+// 18) Total Apple Demand scales correctly for every host-selectable team
+// count (3-8) with the new default of 70/team, and allocation invariants
+// (never exceed the pool, never exceed what a team offered) hold every time.
+{
+  const expectedTotals = { 3: 210, 4: 280, 5: 350, 6: 420, 7: 490, 8: 560 };
+  Object.keys(expectedTotals).forEach((key) => {
+    const teamCount = Number(key);
+    const expectedTotal = expectedTotals[key];
+    assert.strictEqual(teamCount * e.CONFIG.DEMAND_PER_TEAM, expectedTotal, `${teamCount} teams x ${e.CONFIG.DEMAND_PER_TEAM}/team should equal ${expectedTotal} - formula must never be hardcoded per team-count`);
+
+    // Every team offers 100 units (the default production floor) so total
+    // supply (teamCount*100) exceeds total demand whenever teamCount < 10 -
+    // exactly the scenario the pool has to ration.
+    const teams = [];
+    for (let i = 0; i < teamCount; i++) {
+      teams.push({ teamId: 't' + i, price: 40 + i * 5, quantity: 100, techLevel: Math.max(0, 5 - i), capacityLevel: Math.max(0, 5 - i), lockOrder: i });
+    }
+    const results = e.resolveApplePurchase({ teams, weights: e.CONFIG.WEIGHTS_DEFAULT, demandPerTeam: e.CONFIG.DEMAND_PER_TEAM });
+    const totalPurchased = results.reduce((s, r) => s + r.purchased, 0);
+
+    assert.strictEqual(totalPurchased, expectedTotal, `${teamCount} teams: total units sold (${totalPurchased}) must exactly fill the ${expectedTotal}-unit pool, never more`);
+    results.forEach((r) => {
+      assert.ok(r.purchased <= 100, `${teamCount} teams: no team ever sells more than it offered/had in inventory`);
+      assert.ok(r.purchased >= 0, `${teamCount} teams: never a negative sale`);
+    });
+    const lowestRanked = results[results.length - 1];
+    assert.ok(lowestRanked.purchased < 100, `${teamCount} teams: the lowest-scoring team never sells its full offer once the pool runs out - competition is real, not everyone just sells 100`);
+  });
+
+  // The exact worked example from the spec: 5 teams, 70/team -> 350 total,
+  // supply 500 -> allocation should land on 100/100/100/50/0.
+  {
+    const teams = [0, 1, 2, 3, 4].map((i) => ({ teamId: 'team' + i, price: 40 + i * 5, quantity: 100, techLevel: 5 - i, capacityLevel: 5 - i, lockOrder: i }));
+    const results = e.resolveApplePurchase({ teams, weights: e.CONFIG.WEIGHTS_DEFAULT, demandPerTeam: 70 });
+    const sold = results.map((r) => r.purchased);
+    assert.deepStrictEqual(sold, [100, 100, 100, 50, 0], '5-team worked example matches the spec exactly: A/B/C sell out, D gets the remainder, E gets nothing');
+  }
+}
+
+console.log('All Total-Apple-Demand (3-8 team) checks passed.');

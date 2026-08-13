@@ -137,9 +137,11 @@ function publicTeam(team, viewerTeamId, isPrivileged, room) {
 function broadcastState(room) {
   room.lastActivityAt = Date.now();
   const teamList = Object.values(room.teams);
+  const effectiveDemandPerTeam = roomDemandPerTeam(room);
+  const totalDemand = effectiveDemandPerTeam * teamList.length;
   const preview =
     room.phase === 'round_active'
-      ? engine.computeLivePreview({ teams: teamList, weights: roomWeights(room), demandPerTeam: roomDemandPerTeam(room) })
+      ? engine.computeLivePreview({ teams: teamList, weights: roomWeights(room), demandPerTeam: effectiveDemandPerTeam })
       : {};
   teamList.forEach((viewer) => {
     if (!viewer.socketId || !viewer.connected) return;
@@ -151,6 +153,8 @@ function broadcastState(room) {
       paused: room.paused,
       marketPrice: room.marketPrice,
       maxPrice: engine.calcMaxPrice(room.marketPrice),
+      demandPerTeam: effectiveDemandPerTeam,
+      totalDemand,
       shock: publicShock(room.activeShock, false),
       preview: preview[viewer.teamId] || null,
       teams: teamList.map((t) => publicTeam(t, viewer.teamId, false, room))
@@ -165,6 +169,8 @@ function broadcastState(room) {
       paused: room.paused,
       marketPrice: room.marketPrice,
       maxPrice: engine.calcMaxPrice(room.marketPrice),
+      demandPerTeam: effectiveDemandPerTeam,
+      totalDemand,
       shock: publicShock(room.activeShock, true),
       teams: teamList.map((t) => publicTeam(t, null, true, room))
     });
