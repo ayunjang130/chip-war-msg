@@ -30,7 +30,7 @@ const PORT = process.env.PORT || 3000;
 
 // roomCode -> room state object
 const rooms = {};
-// socket.id -> { roomCode, teamId?, role: 'player' | 'host' }
+// socket.id -> { roomCode, teamId?, memberId?, role: 'player' | 'host' }
 const socketMeta = {};
 
 const NEXT_ROUND_DELAY_MS = 20000; // auto-advance this long after results, host can skip it
@@ -46,13 +46,30 @@ function genRoomCode() {
   return rooms[code] ? genRoomCode() : code;
 }
 
-function createTeamState(teamId, teamName, companyName, socketId, startingCapital, isBot = false, botStrategy = null) {
+// ---- Team membership (up to MAX_MEMBERS_PER_TEAM real people sharing one
+// company's game state) ------------------------------------------------
+function addMember(team, socketId, memberName) {
+  const memberId = genId('member');
+  const cleanName = (memberName || '').trim().slice(0, 24) || `Member ${team.members.length + 1}`;
+  team.members.push({ memberId, socketId, memberName: cleanName, connected: true });
+  return memberId;
+}
+function findMember(team, memberId) {
+  return team.members.find((m) => m.memberId === memberId);
+}
+function findMemberBySocket(team, socketId) {
+  return team.members.find((m) => m.socketId === socketId);
+}
+function teamIsConnected(team) {
+  return team.members.some((m) => m.connected);
+}
+
+function createTeamState(teamId, teamName, companyName, startingCapital, isBot = false, botStrategy = null) {
   return {
     teamId,
     teamName,
     companyName,
-    socketId,
-    connected: !isBot,
+    members: [], // {memberId, socketId, memberName, connected} - up to MAX_MEMBERS_PER_TEAM
     isBot,
     botStrategy,
     capital: startingCapital,
@@ -118,8 +135,11 @@ function publicTeam(team, viewerTeamId, isPrivileged, room) {
     teamId: team.teamId,
     teamName: team.teamName,
     companyName: team.companyName,
-    connected: team.connected,
+    connected: teamIsConnected(team),
     isBot: team.isBot,
+    memberCount: team.members.length,
+    maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM,
+    members: team.members.map((m) => ({ memberName: m.memberName, connected: m.connected })),
     price: team.price,
     quantity: team.quantity,
     techLevel: team.techLevel,
@@ -143,9 +163,11 @@ function broadcastState(room) {
     room.phase === 'round_active'
       ? engine.computeLivePreview({ teams: teamList, weights: roomWeights(room), demandPerTeam: effectiveDemandPerTeam })
       : {};
-  teamList.forEach((viewer) => {
-    if (!viewer.socketId || !viewer.connected) return;
-    io.to(viewer.socketId).emit('STATE_SYNC', {
+
+  teamList.forEach((team) => {
+    const connectedMembers = team.members.filter((m) => m.socketId && m.connected);
+    if (connectedMembers.length === 0) return;
+    const payload = {
       round: room.round,
       totalRounds: engine.CONFIG.ROUNDS,
       phase: room.phase,
@@ -156,10 +178,15 @@ function broadcastState(room) {
       demandPerTeam: effectiveDemandPerTeam,
       totalDemand,
       shock: publicShock(room.activeShock, false),
-      preview: preview[viewer.teamId] || null,
-      teams: teamList.map((t) => publicTeam(t, viewer.teamId, false, room))
-    });
+      preview: preview[team.teamId] || null,
+      teams: teamList.map((t) => publicTeam(t, team.teamId, false, room))
+    };
+    // Same payload object, fanned out to every device this team currently
+    // has connected - any of them can act on it, per the "up to 4 people,
+    // one shared company" design.
+    connectedMembers.forEach((m) => io.to(m.socketId).emit('STATE_SYNC', payload));
   });
+
   if (room.hostSocketId) {
     io.to(room.hostSocketId).emit('STATE_SYNC', {
       round: room.round,
@@ -187,8 +214,11 @@ function broadcastLobby(room) {
       teamId: t.teamId,
       teamName: t.teamName,
       companyName: t.companyName,
-      connected: t.connected,
-      isBot: t.isBot
+      connected: teamIsConnected(t),
+      isBot: t.isBot,
+      memberCount: t.members.length,
+      maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM,
+      members: t.members.map((m) => ({ memberName: m.memberName, connected: m.connected }))
     }))
   };
   io.to(room.code).emit('LOBBY_UPDATE', payload);
@@ -620,67 +650,108 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('JOIN_ROOM', ({ roomCode, teamName, companyName, teamId }, cb) => {
+  // Read-only: lets the join screen show "who's already in this room" (and
+  // how full each team is) BEFORE actually joining anything. Works at any
+  // phase - browsing doesn't commit to anything, so it's harmless mid-match.
+  socket.on('LOOKUP_ROOM', ({ roomCode }, cb) => {
+    const room = rooms[roomCode];
+    if (!room) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
+    cb &&
+      cb({
+        ok: true,
+        phase: room.phase,
+        teams: Object.values(room.teams)
+          .filter((t) => !t.isBot)
+          .map((t) => ({ teamId: t.teamId, teamName: t.teamName, companyName: t.companyName, memberCount: t.members.length, maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM }))
+      });
+  });
+
+  socket.on('JOIN_ROOM', ({ roomCode, teamName, companyName, teamId, memberId, memberName }, cb) => {
     const room = rooms[roomCode];
     if (!room) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
 
-    let team = teamId ? room.teams[teamId] : null;
-    if (team) {
-      // Reconnection Session Recovery: same teamId found, restore the socket.
-      team.socketId = socket.id;
-      team.connected = true;
-    } else {
-      // A brand-new team can only join while the room is still in the lobby
-      // - letting someone parachute into an in-progress round with 0
-      // inventory/investment was confusing and unfair to everyone.
-      if (room.phase !== 'lobby') {
-        return cb && cb({ ok: false, error: 'GAME_IN_PROGRESS' });
+    function finishJoin(team, mId) {
+      socket.join(roomCode);
+      socketMeta[socket.id] = { roomCode, teamId: team.teamId, memberId: mId, role: 'player' };
+      cb && cb({ ok: true, teamId: team.teamId, memberId: mId, roomCode });
+      broadcastLobby(room);
+      broadcastState(room);
+      // Catch up a (re)joining client on whatever already happened - without
+      // this, reconnecting mid/after a round showed an empty results/game-
+      // over screen, since those only ever populate from their one-shot
+      // events, which a fresh STATE_SYNC doesn't resend.
+      if (room.phase === 'round_results' && room.lastResultsPayload) {
+        io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
+      } else if (room.phase === 'game_over' && room.finalPayload) {
+        io.to(socket.id).emit('GAME_OVER', room.finalPayload);
       }
-      if (Object.keys(room.teams).length >= room.config.maxTeams) {
-        return cb && cb({ ok: false, error: 'ROOM_FULL' });
-      }
-      const id = genId('team');
-      const base = (companyName || 'Company').trim() || 'Company';
-      const taken = new Set(Object.values(room.teams).map((t) => t.companyName));
-      let candidate = base;
-      let suffix = 1;
-      while (taken.has(candidate)) {
-        suffix += 1;
-        candidate = `${base} ${suffix}`;
-      }
-      team = createTeamState(id, (teamName || `Team ${Object.keys(room.teams).length + 1}`).trim(), candidate, socket.id, room.config.startingCapital);
-      room.teams[id] = team;
     }
 
-    socket.join(roomCode);
-    socketMeta[socket.id] = { roomCode, teamId: team.teamId, role: 'player' };
-    cb && cb({ ok: true, teamId: team.teamId, roomCode });
-    broadcastLobby(room);
-    broadcastState(room);
-    // Catch up a (re)joining client on whatever already happened - without
-    // this, reconnecting mid/after a round showed an empty results/game-over
-    // screen, because those screens only ever populate from their one-shot
-    // ROUND_RESULT/GAME_OVER events, which a fresh STATE_SYNC doesn't resend.
-    if (room.phase === 'round_results' && room.lastResultsPayload) {
-      io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
-    } else if (room.phase === 'game_over' && room.finalPayload) {
-      io.to(socket.id).emit('GAME_OVER', room.finalPayload);
+    if (teamId) {
+      const team = room.teams[teamId];
+      if (!team) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
+
+      if (memberId) {
+        // Reconnection Session Recovery: same memberId found, restore the socket.
+        const member = findMember(team, memberId);
+        if (!member) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
+        member.socketId = socket.id;
+        member.connected = true;
+        return finishJoin(team, member.memberId);
+      }
+
+      // Joining an EXISTING team as a brand-new teammate. Allowed at any
+      // phase, including mid-match - unlike spawning a whole new team,
+      // adding a hand to a company that's already playing doesn't touch
+      // production/investment history or game balance.
+      if (team.members.length >= engine.CONFIG.MAX_MEMBERS_PER_TEAM) {
+        return cb && cb({ ok: false, error: 'TEAM_FULL' });
+      }
+      const newMemberId = addMember(team, socket.id, memberName);
+      return finishJoin(team, newMemberId);
     }
+
+    // Creating a brand-new team - lobby only, same reasoning as above but
+    // in reverse: a fresh team has no inventory/investment yet, so it can
+    // only start fair at the top of a match.
+    if (room.phase !== 'lobby') {
+      return cb && cb({ ok: false, error: 'GAME_IN_PROGRESS' });
+    }
+    if (Object.keys(room.teams).length >= room.config.maxTeams) {
+      return cb && cb({ ok: false, error: 'ROOM_FULL' });
+    }
+    const id = genId('team');
+    const base = (companyName || 'Company').trim() || 'Company';
+    const taken = new Set(Object.values(room.teams).map((t) => t.companyName));
+    let candidate = base;
+    let suffix = 1;
+    while (taken.has(candidate)) {
+      suffix += 1;
+      candidate = `${base} ${suffix}`;
+    }
+    const cleanTeamName = (teamName || `Team ${Object.keys(room.teams).length + 1}`).trim();
+    const team = createTeamState(id, cleanTeamName, candidate, room.config.startingCapital);
+    room.teams[id] = team;
+    const newMemberId = addMember(team, socket.id, memberName || teamName);
+    finishJoin(team, newMemberId);
   });
 
   // A player backing out of a room. Allowed in the lobby (before a match
   // starts) and after game_over (once it's fully done) - NOT mid-match,
   // since a team mid-round has already affected production/history that
   // shouldn't just vanish; disconnect (tab close) covers that case instead.
-  socket.on('LEAVE_ROOM', ({ roomCode, teamId }) => {
+  // Removes only the requesting member - if that was the last one, the
+  // team itself goes too.
+  socket.on('LEAVE_ROOM', ({ roomCode, teamId, memberId }) => {
     const room = rooms[roomCode];
     if (!room || (room.phase !== 'lobby' && room.phase !== 'game_over')) return;
-    if (teamId && room.teams[teamId]) {
-      delete room.teams[teamId];
-      delete socketMeta[socket.id];
-      broadcastLobby(room);
-      broadcastState(room);
-    }
+    const team = room.teams[teamId];
+    if (!team) return;
+    team.members = team.members.filter((m) => m.memberId !== memberId);
+    delete socketMeta[socket.id];
+    if (team.members.length === 0) delete room.teams[teamId];
+    broadcastLobby(room);
+    broadcastState(room);
   });
 
   // Live typed price/quantity - broadcast immediately so opponents can see
@@ -767,7 +838,13 @@ io.on('connection', (socket) => {
       return;
     }
     const sender = teamId ? room.teams[teamId] : null;
-    const name = sender ? sender.companyName : 'HOST';
+    let name = 'HOST';
+    if (sender) {
+      const member = findMemberBySocket(sender, socket.id);
+      // Only disambiguate by member name once a team actually HAS more than
+      // one person - keeps the common single-member case exactly as before.
+      name = sender.companyName + (member && sender.members.length > 1 ? ` (${member.memberName})` : '');
+    }
     const msg = { id: genId('msg'), name, text: trimmed, at: Date.now() };
     room.chatLog.push(msg);
     if (room.chatLog.length > 200) room.chatLog.shift();
@@ -820,7 +897,7 @@ io.on('connection', (socket) => {
       name = `${label} ${n}`;
     }
     const id = genId('bot');
-    room.teams[id] = createTeamState(id, name, name, null, room.config.startingCapital, true, strategy || 'balanced');
+    room.teams[id] = createTeamState(id, name, name, room.config.startingCapital, true, strategy || 'balanced');
     broadcastLobby(room);
     broadcastState(room);
   });
@@ -829,9 +906,13 @@ io.on('connection', (socket) => {
     const room = rooms[roomCode];
     if (!room || socket.id !== room.hostSocketId) return;
     const team = room.teams[teamId];
-    if (team && team.socketId) {
-      io.to(team.socketId).emit('KICKED', { reason: 'The host removed you from this room.' });
-      delete socketMeta[team.socketId];
+    if (team) {
+      team.members.forEach((m) => {
+        if (m.socketId) {
+          io.to(m.socketId).emit('KICKED', { reason: 'The host removed you from this room.' });
+          delete socketMeta[m.socketId];
+        }
+      });
     }
     delete room.teams[teamId];
     broadcastLobby(room);
@@ -849,7 +930,9 @@ io.on('connection', (socket) => {
     if (room.nextRoundHandle) clearTimeout(room.nextRoundHandle);
     io.to(room.code).emit('ROOM_CLOSED', { reason: 'The host has closed this room.' });
     Object.values(room.teams).forEach((t) => {
-      if (t.socketId) delete socketMeta[t.socketId];
+      t.members.forEach((m) => {
+        if (m.socketId) delete socketMeta[m.socketId];
+      });
     });
     delete socketMeta[socket.id];
     delete rooms[roomCode];
@@ -900,8 +983,12 @@ io.on('connection', (socket) => {
     const room = rooms[meta.roomCode];
     if (room) {
       if (meta.role === 'player' && meta.teamId && room.teams[meta.teamId]) {
-        room.teams[meta.teamId].connected = false;
-        room.teams[meta.teamId].socketId = null;
+        const team = room.teams[meta.teamId];
+        const member = meta.memberId ? findMember(team, meta.memberId) : findMemberBySocket(team, socket.id);
+        if (member) {
+          member.connected = false;
+          member.socketId = null;
+        }
         broadcastLobby(room);
         broadcastState(room);
       } else if (meta.role === 'host' && room.hostSocketId === socket.id) {
@@ -927,7 +1014,7 @@ setInterval(() => {
   Object.keys(rooms).forEach((code) => {
     const room = rooms[code];
     const hostConnected = !!room.hostSocketId;
-    const anyPlayerConnected = Object.values(room.teams).some((t) => t.connected);
+    const anyPlayerConnected = Object.values(room.teams).some((t) => teamIsConnected(t));
     const idleTooLong = now - room.lastActivityAt > STALE_ROOM_MS;
     if (!hostConnected && !anyPlayerConnected && idleTooLong) {
       if (room.timerHandle) clearInterval(room.timerHandle);

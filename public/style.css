@@ -261,3 +261,13 @@ h3 .info-tip{ text-transform:none; letter-spacing:0; }
 
 /* ---------- compact header stat (e.g. Apple demand) ---------- */
 .round-header .block.stat-tip{ display:flex; align-items:center; }
+
+/* ---------- team picker (join screen) ---------- */
+.team-pick-card{ border:1px solid var(--line); border-radius:10px; padding:11px 13px; background:var(--bg); }
+.team-pick-card .row-1{ display:flex; align-items:center; gap:8px; }
+.team-pick-card .join-name-row{ display:none; gap:8px; margin-top:9px; }
+.team-pick-card .join-name-row input{ flex:1; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 10px; color:var(--ink); font-family:var(--body); font-size:13px; }
+.roster-row{ display:flex; align-items:center; gap:8px; font-size:13px; }
+.roster-row .dot{ width:7px; height:7px; border-radius:50%; }
+.roster-row .dot.on{ background:var(--green); }
+.roster-row .dot.off{ background:var(--ink-dim); opacity:.5; }

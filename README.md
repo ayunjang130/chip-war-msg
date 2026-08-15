@@ -88,6 +88,30 @@ for 30+ minutes, so long-running public deployments don't leak memory.
       touch); the buttons and live numbers are what's left on screen
 - [x] "How to Play" rewritten as 4 short, complete-sentence steps instead
       of a stack of loosely-related paragraphs
+- [x] Up to 4 people can share control of one team/company - the join
+      screen shows existing teams with open seats, not just "create new"
+
+## Multi-person teams (up to 4 people per company)
+
+A "team" is no longer one device. `room.teams[id].members` is an array
+(max `engine.CONFIG.MAX_MEMBERS_PER_TEAM`, 4) of
+`{ memberId, socketId, memberName, connected }`. All game-affecting actions
+(`UPDATE_INPUT`, `TEAM_INVEST`, `TEAM_UNDO_INVEST`, `LOCK_IN`) still target
+one shared team object - any connected member can act, last-action-wins,
+exactly like a group chat where anyone can type. Capital visibility is
+still per-*team* (all of a team's members see their own team's capital;
+no other team does), unaffected by how many people are behind it.
+
+Joining flow: entering a room code triggers a read-only `LOOKUP_ROOM` call
+that lists teams with open seats (bots excluded - joining a bot doesn't
+make sense). Picking one calls `JOIN_ROOM` with that `teamId` but no
+`memberId`, which the server treats as "seat this new person on an
+existing team" - allowed at *any* match phase, since adding a hand to an
+already-playing company doesn't touch production/investment history the
+way spawning a brand-new team mid-match would (that path is still
+lobby-only). Each browser stores its own `{roomCode, teamId, memberId}` in
+localStorage, so reconnecting (page reload, dropped wifi) restores that
+specific person's seat rather than looking like a new join.
 
 ## Total Apple Demand — visible without the host screen
 

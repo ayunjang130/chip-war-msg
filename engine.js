@@ -42,6 +42,12 @@ const CONFIG = Object.freeze({
   // play alive while blocking the absurd case.
   PRICE_CEILING_MULTIPLIER: 3,
 
+  // How many real people can share control of one team/company. A "team" is
+  // one shared game state (capital, inventory, price, investments) that any
+  // of its connected members can act on - this is a room-membership cap,
+  // not a game-math concept, so nothing here affects the formulas above.
+  MAX_MEMBERS_PER_TEAM: 4,
+
   WEIGHTS_DEFAULT: Object.freeze({ price: 0.5, tech: 0.3, capacity: 0.2 }),
 
   ASSET_RATES: Object.freeze({

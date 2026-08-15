@@ -16,23 +16,35 @@
   <div class="wrap" style="max-width:480px; padding-top:64px;">
     <p class="eyebrow">chip war · msg v2.0</p>
     <h1>Join a match</h1>
-    <p>Enter the room code your host shared, pick a company, and lock in your seat at the table.</p>
+    <p>Enter the room code your host shared. Up to 4 people can share one company.</p>
     <div class="card" style="margin-top:22px;">
       <div class="field">
         <label for="in-roomcode">Room code</label>
         <input id="in-roomcode" maxlength="5" placeholder="e.g. K7QXM" autocomplete="off" style="text-transform:uppercase; letter-spacing:.12em; font-size:18px;">
       </div>
+      <div class="error-text" id="lookup-error"></div>
+    </div>
+
+    <div id="existing-teams-card" class="card" style="display:none; margin-top:16px;">
+      <h3>Join an existing company</h3>
+      <div id="existing-teams-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
+    <div id="new-team-card" class="card" style="margin-top:16px;">
+      <h3>Start a new company</h3>
       <div class="field">
-        <label for="in-teamname">Your name / team name</label>
-        <input id="in-teamname" maxlength="20" placeholder="e.g. Team 4" autocomplete="off">
+        <label for="in-teamname">Your name</label>
+        <input id="in-teamname" maxlength="20" placeholder="e.g. Alex" autocomplete="off">
       </div>
       <div class="field">
         <label>Company identity <span style="text-transform:none; letter-spacing:0;">(cosmetic only)</span></label>
         <div class="company-select" id="company-select"></div>
       </div>
-      <button class="btn btn-gold btn-block" id="btn-join" style="margin-top:6px;">Join room</button>
+      <button class="btn btn-gold btn-block" id="btn-join" style="margin-top:6px;">Create &amp; join</button>
       <div class="error-text" id="join-error"></div>
+      <p class="hint-text" id="new-team-blocked-note" style="display:none;">This match already started — you can still join an existing company above.</p>
     </div>
+
     <p class="footer-note"><a href="#" id="link-howto-join">New here? See how the game works (30 seconds) →</a></p>
     <p class="footer-note">Hosting instead? Open <b>/host</b> on this same server.</p>
   </div>
@@ -47,6 +59,11 @@
     <div class="card" style="margin-top:20px;">
       <h3>Room <span id="lobby-roomcode" style="color:var(--gold)"></span> — companies (<span id="lobby-count">0</span>)</h3>
       <div id="lobby-team-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+    <div class="card" id="lobby-roster-card">
+      <h3>Your teammates <span class="info-tip" data-tip="Up to 4 people can share one company. Anyone on the team can set price/quantity, invest, and lock in — it's shared control, so coordinate out loud or in the chat once the round starts.">i</span></h3>
+      <div id="lobby-roster-list" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+      <p class="hint-text" id="lobby-roster-full-hint"></p>
     </div>
     <div class="center-msg" id="lobby-waiting-msg">Waiting for host to start Round 1…</div>
     <button class="btn btn-block" id="btn-leave-room" style="margin-top:14px;">Exit This Room</button>
@@ -218,7 +235,7 @@
     <button class="modal-close" id="btn-howto-close">✕</button>
     <p class="eyebrow">how to play · 30 seconds</p>
     <h2>You run a chip company.</h2>
-    <p>Over 6 rounds, you compete against other companies to win Apple's purchase orders. The company with the highest value at the end wins.</p>
+    <p>Over 6 rounds, you compete against other companies to win Apple's purchase orders. The company with the highest value at the end wins. Up to 4 people can run one company together — anyone on your team can act, so talk it through as you go.</p>
 
     <div class="howto-step">
       <div class="num">1</div>

@@ -218,6 +218,7 @@
       row.innerHTML =
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
         '<span style="flex:1">' + label + '</span>' +
+        (t.isBot ? '' : '<span class="pill">' + t.memberCount + '/' + t.maxMembers + '</span>') +
         (t.isBot ? '<span class="badge badge-bot">BOT</span>' : '') +
         (!t.connected && !t.isBot ? '<span class="badge badge-offline">OFFLINE</span>' : '') +
         '<button class="btn btn-sm btn-red" data-kick="' + t.teamId + '" style="margin-left:8px;">Kick</button>';
@@ -245,7 +246,7 @@
       const tr = document.createElement('tr');
       const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
       tr.innerHTML =
-        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' 🤖' : '') + '</td>' +
+        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' 🤖' : ' <span class="hint-text">' + t.memberCount + '/' + t.maxMembers + '</span>') + '</td>' +
         '<td>' + (t.locked ? '🔒' : '⏳') + '</td>' +
         '<td>$' + t.price + '</td>' +
         '<td>' + t.quantity + '</td>' +
