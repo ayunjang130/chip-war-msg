@@ -164,7 +164,7 @@ console.log('All market-shock + live-preview checks passed.');
 
 // 13) parseShockResponseText tolerates the messy ways an LLM actually replies
 {
-  const good = JSON.stringify({ title: 'Trade Winds Shift', icon: '🌏', description: 'A new export rule changes the math for Capacity this round.', effects: { capacityProductionMultiplier: 0.8 } });
+  const good = JSON.stringify({ title: 'Trade Winds Shift', description: 'A new export rule changes the math for Capacity this round.', effects: { capacityProductionMultiplier: 0.8 } });
   assert.ok(e.parseShockResponseText(good), 'plain clean JSON parses');
   assert.ok(e.parseShockResponseText('```json\n' + good + '\n```'), 'JSON wrapped in a ```json fence still parses');
   assert.ok(e.parseShockResponseText('Sure, here you go:\n' + good + '\nHope that helps!'), 'stray prose around the JSON is tolerated');
@@ -270,3 +270,28 @@ console.log('All calcMaxPrice + summarizeShockImpact checks passed.');
 }
 
 console.log('All Total-Apple-Demand (3-8 team) checks passed.');
+
+// 19) shockCategoryTag always returns one of a fixed, professional-looking
+// set of tags - never emoji, never missing, regardless of source.
+{
+  assert.strictEqual(e.shockCategoryTag(null), 'MARKET', 'no effects -> MARKET fallback, never a crash');
+  assert.strictEqual(e.shockCategoryTag({ capacityProductionMultiplier: 0.6 }), 'CAPACITY');
+  assert.strictEqual(e.shockCategoryTag({ techUpgradeCostMultiplier: 1.8 }), 'COST');
+  assert.strictEqual(e.shockCategoryTag({ capacityUpgradeCostMultiplier: 0.5 }), 'COST');
+  assert.strictEqual(e.shockCategoryTag({ demandMultiplier: 0.6 }), 'DEMAND');
+  assert.strictEqual(e.shockCategoryTag({ weightBias: { tech: 2 } }), 'PRIORITY');
+  assert.strictEqual(e.shockCategoryTag({}), 'MARKET', 'an all-default effects object reads as MARKET, not a crash');
+
+  const validTags = new Set(['MARKET', 'CAPACITY', 'COST', 'DEMAND', 'PRIORITY']);
+  // Every procedural template, drawn many times, must sanitize to a shock
+  // with a real title/description and a valid tag - and never an `icon`
+  // field, confirming the emoji concept is fully gone from the data shape.
+  for (let i = 0; i < 40; i++) {
+    const s = e.pickProceduralShock([]);
+    assert.ok(validTags.has(s.categoryTag), `procedural shock has a valid categoryTag, got "${s.categoryTag}"`);
+    assert.strictEqual(s.icon, undefined, 'procedural shocks no longer carry an icon field at all');
+  }
+  assert.strictEqual(e.NEUTRAL_SHOCK.icon, undefined, 'NEUTRAL_SHOCK no longer carries an icon field either');
+}
+
+console.log('All shockCategoryTag checks passed.');

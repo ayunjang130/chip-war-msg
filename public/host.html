@@ -35,7 +35,7 @@
 
     <div class="two-col" style="margin-top:20px; align-items:start;">
       <div class="card">
-        <h3>Companies joined (<span id="team-count">0</span> / <span id="team-max">8</span>)</h3>
+        <h3>Teams joined (<span id="team-count">0</span> / <span id="team-max">8</span>)</h3>
         <div id="team-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
         <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn btn-sm" data-bot="tech">+ AI Tech-Bot</button>
@@ -151,7 +151,7 @@
 
         <div class="shock-loading" id="shock-loading" style="display:none;"><span class="spin"></span> Deciding this round's market shock…</div>
     <div class="shock-banner" id="shock-banner" style="display:none;">
-      <div class="icon" id="shock-icon">⚡</div>
+      <div class="category-tag" id="shock-tag">MARKET</div>
       <div>
         <div class="title" id="shock-title">—</div>
         <div class="desc" id="shock-desc">—</div>
@@ -162,7 +162,7 @@
     <div class="card" style="overflow-x:auto;">
       <h3>Live team status <span class="hint-text">(host sees capital — players only see their own)</span></h3>
       <table style="margin-top:8px;">
-        <thead><tr><th>Company</th><th>Locked</th><th>Price</th><th>Qty</th><th>Tech</th><th>Cap</th><th>Capital</th><th></th></tr></thead>
+        <thead><tr><th>Team</th><th>Locked</th><th>Price</th><th>Qty</th><th>Tech</th><th>Cap</th><th>Capital</th><th></th></tr></thead>
         <tbody id="live-table-body"></tbody>
       </table>
     </div>
@@ -171,7 +171,7 @@
       <h3>Round results</h3>
       <div style="overflow-x:auto;">
         <table>
-          <thead><tr><th>Company</th><th>Price</th><th>Sold</th><th>Revenue</th><th>Unsold</th></tr></thead>
+          <thead><tr><th>Team</th><th>Price</th><th>Sold</th><th>Revenue</th><th>Unsold</th></tr></thead>
           <tbody id="live-results-body"></tbody>
         </table>
       </div>
@@ -196,7 +196,7 @@
 <section id="screen-gameover" class="screen">
   <div class="wrap" style="max-width:720px; padding-top:56px;">
     <p class="eyebrow">final results — round 6 complete</p>
-    <h1 id="final-winner-banner">🏆 —</h1>
+    <h1 id="final-winner-banner">—</h1>
     <div id="final-leaderboard" style="margin-top:22px;"></div>
 
     <div class="card" style="margin-top:18px;">
@@ -212,12 +212,24 @@
       <canvas id="chart-mp" height="180"></canvas>
     </div>
 
-    <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">⬇️ Download match data (CSV)</button>
+    <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">Download match data (CSV)</button>
     <button class="btn btn-gold btn-block" id="btn-reset" style="margin-top:10px;">Reset room &amp; play again</button>
   </div>
 </section>
 
 <button class="help-fab" id="btn-help-fab" title="Game rules summary">?</button>
+
+<div class="modal-overlay" id="confirm-modal">
+  <div class="modal-box confirm-box" id="confirm-box">
+    <div class="confirm-bar"></div>
+    <h2 id="confirm-title">Are you sure?</h2>
+    <p id="confirm-message">This action cannot be undone.</p>
+    <div class="confirm-actions">
+      <button class="btn" id="confirm-cancel-btn">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn">Confirm</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal-overlay" id="howto-modal">
   <div class="modal-box">
@@ -242,7 +254,7 @@
       <div class="num">4</div>
       <div class="txt"><b>After Round 6</b><p>Highest total Company Value (cash + leftover chips + tech + capacity) wins. You control pacing with Pause / Resume / Force skip below.</p></div>
     </div>
-    <div class="howto-formula">⚡ Every round also rolls one random <b style="color:var(--ink)">Market Shock</b> that temporarily changes the rules — e.g. Capacity efficiency down, or Apple weighing Tech higher. It's what stops the same build order from winning every match. Players see the plain-language version; you see the exact numbers behind it too.</div>
+    <div class="howto-formula">Every round also rolls one random <b style="color:var(--ink)">Market Shock</b> that temporarily changes the rules — e.g. Capacity efficiency down, or Apple weighing Tech higher. It's what stops the same build order from winning every match. Players see the plain-language version; you see the exact numbers behind it too.</div>
     <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Close</button>
   </div>
 </div>

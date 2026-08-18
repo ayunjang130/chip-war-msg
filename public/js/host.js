@@ -8,6 +8,7 @@
   let lastHistory = [];
   let charts = {};
   let currentTeamCount = 0; // kept in sync from LOBBY_UPDATE/STATE_SYNC, used for the Total Apple Demand preview
+  let confirmCallback = null;
 
   const $ = (id) => document.getElementById(id);
   function money(n) {
@@ -19,6 +20,9 @@
     for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
     return TEAM_COLORS[Math.abs(h) % TEAM_COLORS.length];
   }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
   function routeScreen(phase) {
     const map = { lobby: 'screen-lobby', round_active: 'screen-live', round_results: 'screen-live', game_over: 'screen-gameover' };
     const target = map[phase];
@@ -28,6 +32,28 @@
     $('live-results-card').style.display = phase === 'round_results' ? 'block' : 'none';
     lastPhase = phase;
   }
+
+  // ---------- custom confirm/notice modal (replaces native confirm()/alert()) ----------
+  function showConfirm(title, message, confirmLabel, onConfirm, opts) {
+    opts = opts || {};
+    $('confirm-title').textContent = title;
+    $('confirm-message').textContent = message;
+    $('confirm-ok-btn').textContent = confirmLabel || 'Confirm';
+    $('confirm-cancel-btn').style.display = opts.noCancel ? 'none' : '';
+    $('confirm-box').classList.toggle('neutral', !!opts.neutral);
+    confirmCallback = onConfirm || null;
+    $('confirm-modal').classList.add('active');
+  }
+  function closeConfirm() {
+    $('confirm-modal').classList.remove('active');
+    confirmCallback = null;
+  }
+  $('confirm-cancel-btn').addEventListener('click', closeConfirm);
+  $('confirm-ok-btn').addEventListener('click', () => {
+    const cb = confirmCallback;
+    closeConfirm();
+    if (cb) cb();
+  });
 
   // ---------- rules summary modal ----------
   function openHowTo() { $('howto-modal').classList.add('active'); }
@@ -39,7 +65,7 @@
   // ---------- AI shock status ----------
   function renderAiStatus(aiEnabled) {
     const el = $('ai-shock-status');
-    el.textContent = aiEnabled ? '✨ AI-generated market shocks: ON' : '🔧 Using built-in shock templates (no ANTHROPIC_API_KEY set)';
+    el.textContent = aiEnabled ? 'AI-generated market shocks: ON' : 'Using built-in shock templates (no ANTHROPIC_API_KEY set)';
     el.style.borderColor = aiEnabled ? 'rgba(139,124,246,0.5)' : 'var(--line)';
     el.style.color = aiEnabled ? '#c4b5fd' : 'var(--ink-dim)';
   }
@@ -70,8 +96,7 @@
       return;
     }
     el.style.display = 'flex';
-    el.classList.toggle('ai', shock.source === 'ai');
-    $('shock-icon').textContent = shock.icon || '⚡';
+    $('shock-tag').textContent = shock.categoryTag || 'MARKET';
     $('shock-title').textContent = shock.title;
     $('shock-desc').textContent = shock.description;
     $('shock-effects').textContent = (shock.impact || '') + '  |  raw: ' + summarizeEffects(shock.effects);
@@ -157,7 +182,7 @@
       roomCode: myRoomCode,
       config: {
         weights: { price: Number($('cfg-wp').value) || 0, tech: Number($('cfg-wt').value) || 0, capacity: Number($('cfg-wc').value) || 0 },
-        demandPerTeam: Number($('cfg-demand').value) || 200,
+        demandPerTeam: Number($('cfg-demand').value) || 70,
         roundTimerSeconds: Number($('cfg-timer').value) || 180,
         maxTeams: Number($('cfg-maxteams').value) || 8,
         startingCapital: Number($('cfg-capital').value) || 5000,
@@ -173,7 +198,7 @@
     socket.emit('HOST_UPDATE_CONFIG', {
       roomCode: myRoomCode,
       config: {
-        demandPerTeam: Number($('live-cfg-demand').value) || 200,
+        demandPerTeam: Number($('live-cfg-demand').value) || 70,
         roundTimerSeconds: Number($('live-cfg-timer').value) || 180,
         marketVolatility: Number($('live-cfg-volatility').value) || 1
       }
@@ -183,12 +208,13 @@
   });
 
   function confirmDestroyRoom() {
-    if (!confirm('Destroy this room? Every connected player will be disconnected and this cannot be undone.')) return;
-    socket.emit('HOST_DESTROY_ROOM', { roomCode: myRoomCode });
-    localStorage.removeItem(HOST_SESSION_KEY);
-    myRoomCode = null;
-    document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
-    $('screen-setup').classList.add('active');
+    showConfirm('Destroy this room?', 'Every connected player will be disconnected. This cannot be undone.', 'Destroy Room', () => {
+      socket.emit('HOST_DESTROY_ROOM', { roomCode: myRoomCode });
+      localStorage.removeItem(HOST_SESSION_KEY);
+      myRoomCode = null;
+      document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
+      $('screen-setup').classList.add('active');
+    });
   }
   $('btn-destroy-room-lobby').addEventListener('click', confirmDestroyRoom);
   $('btn-destroy-room-live').addEventListener('click', confirmDestroyRoom);
@@ -214,10 +240,9 @@
       const row = document.createElement('div');
       row.className = 'pill';
       row.style.justifyContent = 'flex-start';
-      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
-        '<span style="flex:1">' + label + '</span>' +
+        '<span style="flex:1"><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b></span>' +
         (t.isBot ? '' : '<span class="pill">' + t.memberCount + '/' + t.maxMembers + '</span>') +
         (t.isBot ? '<span class="badge badge-bot">BOT</span>' : '') +
         (!t.connected && !t.isBot ? '<span class="badge badge-offline">OFFLINE</span>' : '') +
@@ -226,8 +251,8 @@
     });
     list.querySelectorAll('[data-kick]').forEach((b) => {
       b.addEventListener('click', () => {
-        if (!confirm('Remove this team from the room?')) return;
-        socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId: b.dataset.kick });
+        const teamId = b.dataset.kick;
+        showConfirm('Remove this team?', 'They will be disconnected from the room.', 'Kick', () => socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId }));
       });
     });
     $('btn-start-game').disabled = payload.teams.length < 3;
@@ -244,10 +269,10 @@
     body.innerHTML = '';
     payload.teams.forEach((t) => {
       const tr = document.createElement('tr');
-      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
+      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>';
       tr.innerHTML =
-        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' 🤖' : ' <span class="hint-text">' + t.memberCount + '/' + t.maxMembers + '</span>') + '</td>' +
-        '<td>' + (t.locked ? '🔒' : '⏳') + '</td>' +
+        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' <span class="badge badge-bot">BOT</span>' : ' <span class="hint-text">' + t.memberCount + '/' + t.maxMembers + '</span>') + '</td>' +
+        '<td><span class="status-dot ' + (t.locked ? 'locked' : 'open') + '"></span></td>' +
         '<td>$' + t.price + '</td>' +
         '<td>' + t.quantity + '</td>' +
         '<td>Lv' + t.techLevel + '</td>' +
@@ -258,8 +283,8 @@
     });
     body.querySelectorAll('[data-kick-live]').forEach((b) => {
       b.addEventListener('click', () => {
-        if (!confirm('Remove this team from the room? Their in-progress round will just be dropped.')) return;
-        socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId: b.dataset.kickLive });
+        const teamId = b.dataset.kickLive;
+        showConfirm('Remove this team?', 'Their in-progress round will just be dropped.', 'Kick', () => socket.emit('HOST_KICK_TEAM', { roomCode: myRoomCode, teamId }));
       });
     });
   }
@@ -279,7 +304,7 @@
     body.innerHTML = '';
     payload.results.forEach((r) => {
       const tr = document.createElement('tr');
-      const label = '<b style="font-family:var(--display);">' + escapeHtml(r.teamName || r.companyName) + '</b> <span class="hint-text">(' + escapeHtml(r.companyName) + ')</span>';
+      const label = '<b style="font-family:var(--display);">' + escapeHtml(r.teamName) + '</b>';
       tr.innerHTML =
         '<td style="color:' + colorFor(r.teamId) + '">' + label + '</td>' +
         '<td>$' + r.price + '</td>' +
@@ -291,16 +316,15 @@
   }
 
   function renderGameOver(payload) {
-    $('final-winner-banner').textContent = payload.winner ? '🏆 ' + (payload.winner.teamName || payload.winner.companyName) + ' wins' : 'Game over';
+    $('final-winner-banner').textContent = payload.winner ? payload.winner.teamName + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
     payload.leaderboard.forEach((t, idx) => {
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
-      const nameLine = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text" style="font-weight:400;">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<div class="rank">' + (idx + 1) + '</div>' +
-        '<div class="name">' + nameLine +
+        '<div class="name"><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' · tech Lv' + t.techLevel + ' · capacity Lv' + t.capacityLevel + '</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
       el.appendChild(row);
@@ -333,7 +357,7 @@
     history.forEach((h) =>
       h.results.forEach((r) => {
         if (!(r.teamId in teamMeta)) teamIds.push(r.teamId);
-        teamMeta[r.teamId] = r.companyName;
+        teamMeta[r.teamId] = r.teamName;
       })
     );
     const seriesFor = (pick) =>
@@ -357,10 +381,10 @@
   }
   function downloadMatchCSV() {
     if (!lastHistory || !lastHistory.length) return;
-    const rows = [['round', 'marketPrice', 'shockTitle', 'teamName', 'companyName', 'price', 'quantityOffered', 'quantitySold', 'revenue', 'unsoldInventory', 'capital', 'techLevel', 'capacityLevel', 'competitiveScore']];
+    const rows = [['round', 'marketPrice', 'shockTitle', 'teamName', 'price', 'quantityOffered', 'quantitySold', 'revenue', 'unsoldInventory', 'capital', 'techLevel', 'capacityLevel', 'competitiveScore']];
     lastHistory.forEach((h) => {
       h.results.forEach((r) => {
-        rows.push([h.round, h.marketPrice, h.shock ? h.shock.title : '', r.teamName || '', r.companyName, r.price, r.quantityOffered, r.quantitySold, r.revenue, r.unsoldInventory, r.capital, r.techLevel, r.capacityLevel, r.competitiveScore]);
+        rows.push([h.round, h.marketPrice, h.shock ? h.shock.title : '', r.teamName, r.price, r.quantityOffered, r.quantitySold, r.revenue, r.unsoldInventory, r.capital, r.techLevel, r.capacityLevel, r.competitiveScore]);
       });
     });
     const csv = rows.map((row) => row.map((cell) => { const s = String(cell == null ? '' : cell); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\n');
@@ -381,12 +405,9 @@
     const log = $('chat-log');
     const row = document.createElement('div');
     row.className = 'chat-msg';
-    row.innerHTML = '<span class="who" style="color:' + colorFor(msg.name) + '">' + msg.name + ':</span> ' + escapeHtml(msg.text);
+    row.innerHTML = '<span class="who" style="color:' + colorFor(msg.name) + '">' + escapeHtml(msg.name) + ':</span> ' + escapeHtml(msg.text);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
-  }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
   $('btn-chat-send').addEventListener('click', () => {
     const input = $('chat-input');

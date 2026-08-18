@@ -1,5 +1,4 @@
 (function () {
-  const COMPANIES = ['Samsung', 'Intel', 'NVIDIA', 'TSMC', 'AMD', 'Qualcomm'];
   const TEAM_COLORS = ['#f0b429', '#5b8def', '#ff5c5c', '#35d488', '#c77edb', '#4fd1c5', '#f2d152', '#f28fb2'];
   const SESSION_KEY = 'chipwar_session';
 
@@ -8,14 +7,15 @@
   let myRoomCode = null;
   let myTeamId = null;
   let myMemberId = null;
-  let selectedCompany = null;
+  let selectedJoinTeamId = null;
   let lookupTimer = null;
   let lastTicker = {}; // teamId -> "price:quantity" for whole-card flash-on-change
-  let lastPriceByTeam = {}; // teamId -> last seen price, for per-value pop + direction arrow
-  let lastQtyByTeam = {}; // teamId -> last seen quantity, same idea
+  let lastPriceByTeam = {};
+  let lastQtyByTeam = {};
   let priceTimer = null;
-  let lastHistory = []; // full round-by-round data from the last completed match, for charts + CSV
+  let lastHistory = [];
   let charts = {};
+  let confirmCallback = null;
 
   // ---------- small helpers ----------
   const $ = (id) => document.getElementById(id);
@@ -28,6 +28,9 @@
     for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) | 0;
     return TEAM_COLORS[Math.abs(h) % TEAM_COLORS.length];
   }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
   function activateScreen(id) {
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
     $(id).classList.add('active');
@@ -39,135 +42,131 @@
     if (!target) return;
     activateScreen(target);
   }
-
-  // ---------- join screen ----------
-  function renderCompanyOptions() {
-    const el = $('company-select');
-    el.innerHTML = '';
-    COMPANIES.forEach((name) => {
-      const div = document.createElement('div');
-      div.className = 'company-opt';
-      div.textContent = name;
-      div.addEventListener('click', () => {
-        selectedCompany = name;
-        document.querySelectorAll('.company-opt').forEach((o) => o.classList.remove('selected'));
-        div.classList.add('selected');
-      });
-      el.appendChild(div);
-    });
-  }
-
   function forgetSession() {
     localStorage.removeItem(SESSION_KEY);
     myRoomCode = null;
     myTeamId = null;
     myMemberId = null;
   }
-
   function saveSession() {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ roomCode: myRoomCode, teamId: myTeamId, memberId: myMemberId }));
   }
 
-  // ---------- room lookup + team picker (join screen) ----------
-  $('in-roomcode').addEventListener('input', () => {
-    clearTimeout(lookupTimer);
-    $('lookup-error').textContent = '';
-    const code = $('in-roomcode').value.trim().toUpperCase();
-    if (code.length !== 5) {
-      $('existing-teams-card').style.display = 'none';
-      $('new-team-blocked-note').style.display = 'none';
-      $('btn-join').disabled = false;
-      return;
-    }
-    lookupTimer = setTimeout(() => doLookup(code), 400);
+  // ---------- custom confirm/notice modal (replaces native confirm()/alert()) ----------
+  function showConfirm(title, message, confirmLabel, onConfirm, opts) {
+    opts = opts || {};
+    $('confirm-title').textContent = title;
+    $('confirm-message').textContent = message;
+    $('confirm-ok-btn').textContent = confirmLabel || 'Confirm';
+    $('confirm-cancel-btn').style.display = opts.noCancel ? 'none' : '';
+    $('confirm-box').classList.toggle('neutral', !!opts.neutral);
+    confirmCallback = onConfirm || null;
+    $('confirm-modal').classList.add('active');
+  }
+  function closeConfirm() {
+    $('confirm-modal').classList.remove('active');
+    confirmCallback = null;
+  }
+  $('confirm-cancel-btn').addEventListener('click', closeConfirm);
+  $('confirm-ok-btn').addEventListener('click', () => {
+    const cb = confirmCallback;
+    closeConfirm();
+    if (cb) cb();
   });
 
-  function doLookup(code) {
+  // ---------- step navigation (join screen) ----------
+  function showStep(name) {
+    ['roomcode', 'choice', 'create', 'join'].forEach((s) => {
+      $('step-' + s).style.display = s === name ? 'block' : 'none';
+    });
+  }
+  document.querySelectorAll('[data-back]').forEach((b) => {
+    b.addEventListener('click', () => showStep(b.dataset.back));
+  });
+
+  $('btn-find-room').addEventListener('click', () => doLookup());
+  $('in-roomcode').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLookup(); });
+
+  function doLookup() {
+    const code = $('in-roomcode').value.trim().toUpperCase();
+    const err = $('lookup-error');
+    err.textContent = '';
+    if (code.length !== 5) return (err.textContent = 'Room codes are 5 characters.');
     socket.emit('LOOKUP_ROOM', { roomCode: code }, (res) => {
-      if (!res || !res.ok) {
-        $('existing-teams-card').style.display = 'none';
-        return; // don't nag about a typo mid-typing; real errors surface on actual join attempts
-      }
-      renderTeamPicker(res.teams, res.phase);
+      if (!res || !res.ok) return (err.textContent = 'Room not found — check the code.');
+      renderChoiceStep(res.teams, res.phase);
     });
   }
 
-  function renderTeamPicker(teams, phase) {
-    const existingCard = $('existing-teams-card');
+  let lastLookupTeams = [];
+  let lastLookupPhase = 'lobby';
+  function renderChoiceStep(teams, phase) {
+    lastLookupTeams = teams;
+    lastLookupPhase = phase;
+    $('choice-roomcode').textContent = $('in-roomcode').value.trim().toUpperCase();
+    const openTeams = teams.filter((t) => t.memberCount < t.maxMembers);
+    const blocked = phase !== 'lobby';
+    $('choice-create').disabled = blocked;
+    $('choice-create').style.opacity = blocked ? '0.4' : '';
+    $('choice-create-note').textContent = blocked ? 'Match already started' : 'Name your team and start fresh';
+    $('choice-join').disabled = openTeams.length === 0;
+    $('choice-join').style.opacity = openTeams.length === 0 ? '0.4' : '';
+    $('choice-join-note').textContent = openTeams.length === 0 ? 'No teams have an open seat yet' : openTeams.length + ' team' + (openTeams.length === 1 ? '' : 's') + ' have an open seat';
+    showStep('choice');
+  }
+
+  $('choice-create').addEventListener('click', () => {
+    if ($('choice-create').disabled) return;
+    $('join-error').textContent = '';
+    showStep('create');
+  });
+  $('choice-join').addEventListener('click', () => {
+    if ($('choice-join').disabled) return;
+    renderTeamSelectList(lastLookupTeams);
+    showStep('join');
+  });
+
+  function renderTeamSelectList(teams) {
+    selectedJoinTeamId = null;
+    $('btn-join-existing').disabled = true;
+    $('join-existing-error').textContent = '';
     const list = $('existing-teams-list');
     list.innerHTML = '';
-    if (teams.length === 0) {
-      existingCard.style.display = 'none';
-    } else {
-      existingCard.style.display = 'block';
-      teams.forEach((t) => {
-        const full = t.memberCount >= t.maxMembers;
-        const card = document.createElement('div');
-        card.className = 'team-pick-card';
-        card.innerHTML =
-          '<div class="row-1">' +
-          '<b style="font-family:var(--display);">' + escapeHtml(t.companyName) + '</b>' +
-          '<span class="hint-text">(' + escapeHtml(t.teamName) + ')</span>' +
-          '<span class="pill" style="margin-left:auto;">' + t.memberCount + '/' + t.maxMembers + '</span>' +
-          '<button class="btn btn-sm" ' + (full ? 'disabled' : '') + ' data-join-existing="' + t.teamId + '">' + (full ? 'Full' : 'Join') + '</button>' +
-          '</div>' +
-          '<div class="join-name-row"><input type="text" maxlength="20" placeholder="Your name"><button class="btn btn-sm btn-gold" data-confirm-join="' + t.teamId + '">Go</button></div>';
-        list.appendChild(card);
-      });
-    }
-    const blocked = phase !== 'lobby';
-    $('new-team-blocked-note').style.display = blocked ? 'block' : 'none';
-    $('btn-join').disabled = blocked;
-    document.querySelectorAll('.company-opt').forEach((o) => {
-      o.style.pointerEvents = blocked ? 'none' : '';
-      o.style.opacity = blocked ? '0.4' : '';
-    });
-  }
-
-  $('existing-teams-list').addEventListener('click', (e) => {
-    const joinBtn = e.target.closest('[data-join-existing]');
-    if (joinBtn) {
-      const row = joinBtn.closest('.team-pick-card').querySelector('.join-name-row');
-      row.style.display = 'flex';
-      row.querySelector('input').focus();
-      return;
-    }
-    const confirmBtn = e.target.closest('[data-confirm-join]');
-    if (confirmBtn) {
-      const teamId = confirmBtn.dataset.confirmJoin;
-      const input = confirmBtn.closest('.join-name-row').querySelector('input');
-      doJoinExisting(teamId, input.value.trim());
-    }
-  });
-
-  function doJoinExisting(teamId, memberName) {
-    const roomCode = $('in-roomcode').value.trim().toUpperCase();
-    socket.emit('JOIN_ROOM', { roomCode, teamId, memberName }, (res) => {
-      if (!res || !res.ok) {
-        $('lookup-error').textContent = res && res.error === 'TEAM_FULL' ? 'That company just filled up — pick another.' : 'Could not join — try again.';
-        return;
+    teams.forEach((t) => {
+      const full = t.memberCount >= t.maxMembers;
+      const card = document.createElement('div');
+      card.className = 'team-select-card' + (full ? ' full' : '');
+      card.dataset.teamId = t.teamId;
+      card.innerHTML =
+        '<div class="row-1">' +
+        '<b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' +
+        '<span class="pill" style="margin-left:auto;">' + t.memberCount + '/' + t.maxMembers + (full ? ' · Full' : '') + '</span>' +
+        '</div>';
+      if (!full) {
+        card.addEventListener('click', () => {
+          document.querySelectorAll('.team-select-card').forEach((c) => c.classList.remove('selected'));
+          card.classList.add('selected');
+          selectedJoinTeamId = t.teamId;
+          $('btn-join-existing').disabled = false;
+        });
       }
-      myRoomCode = res.roomCode;
-      myTeamId = res.teamId;
-      myMemberId = res.memberId;
-      saveSession();
+      list.appendChild(card);
     });
   }
 
   function doJoin() {
-    const roomCode = $('in-roomcode').value.trim().toUpperCase();
+    const roomCode = $('choice-roomcode').textContent.trim();
     const teamName = $('in-teamname').value.trim();
     const err = $('join-error');
     err.textContent = '';
-    if (!roomCode) return (err.textContent = 'Enter a room code.');
-    if (!selectedCompany) return (err.textContent = 'Pick a company identity.');
+    if (!teamName) return (err.textContent = 'Give your team a name.');
 
     const btn = $('btn-join');
     btn.disabled = true;
-    btn.textContent = 'Joining…';
-    socket.emit('JOIN_ROOM', { roomCode, teamName, companyName: selectedCompany }, (res) => {
+    btn.textContent = 'Creating…';
+    socket.emit('JOIN_ROOM', { roomCode, teamName }, (res) => {
       btn.disabled = false;
-      btn.textContent = 'Create & join';
+      btn.textContent = 'Create team';
       if (!res || !res.ok) {
         if (res && res.error === 'GAME_IN_PROGRESS') {
           activateScreen('screen-blocked');
@@ -182,6 +181,32 @@
       saveSession();
     });
   }
+  $('btn-join').addEventListener('click', doJoin);
+  $('in-teamname').addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
+
+  function doJoinExisting() {
+    if (!selectedJoinTeamId) return;
+    const roomCode = $('choice-roomcode').textContent.trim();
+    const memberName = $('in-membername').value.trim();
+    const err = $('join-existing-error');
+    err.textContent = '';
+    const btn = $('btn-join-existing');
+    btn.disabled = true;
+    btn.textContent = 'Joining…';
+    socket.emit('JOIN_ROOM', { roomCode, teamId: selectedJoinTeamId, memberName }, (res) => {
+      btn.disabled = false;
+      btn.textContent = 'Join team';
+      if (!res || !res.ok) {
+        err.textContent = res && res.error === 'TEAM_FULL' ? 'That team just filled up — pick another.' : 'Could not join — try again.';
+        return;
+      }
+      myRoomCode = res.roomCode;
+      myTeamId = res.teamId;
+      myMemberId = res.memberId;
+      saveSession();
+    });
+  }
+  $('btn-join-existing').addEventListener('click', doJoinExisting);
 
   function tryAutoRejoin() {
     let saved = null;
@@ -202,12 +227,32 @@
     });
   }
 
+  $('btn-exit-blocked').addEventListener('click', () => {
+    $('in-roomcode').value = '';
+    showStep('roomcode');
+    activateScreen('screen-join');
+  });
+
+  function leaveRoom() {
+    showConfirm('Leave this game?', "You'll be removed from your team. You can rejoin later with the room code.", 'Leave Game', () => {
+      socket.emit('LEAVE_ROOM', { roomCode: myRoomCode, teamId: myTeamId, memberId: myMemberId });
+      forgetSession();
+      $('in-roomcode').value = '';
+      $('in-teamname').value = '';
+      showStep('roomcode');
+      activateScreen('screen-join');
+    });
+  }
+  ['btn-leave-room', 'btn-leave-room-game', 'btn-leave-room-results', 'btn-leave-room-final'].forEach((id) => {
+    $(id).addEventListener('click', leaveRoom);
+  });
+
   // ---------- lobby screen ----------
   function renderLobby(payload) {
     $('lobby-roomcode').textContent = payload.roomCode;
     $('lobby-count').textContent = payload.teams.length;
     const me = payload.teams.find((t) => t.teamId === myTeamId);
-    $('lobby-company').textContent = me ? me.companyName : '—';
+    $('lobby-company').textContent = me ? me.teamName : '—';
     const list = $('lobby-team-list');
     list.innerHTML = '';
     payload.teams.forEach((t) => {
@@ -215,10 +260,9 @@
       row.className = 'pill';
       row.style.justifyContent = 'flex-start';
       row.style.alignItems = 'center';
-      const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
-        '<span>' + label + (t.teamId === myTeamId ? ' (me)' : '') + '</span>' +
+        '<span><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' + (t.teamId === myTeamId ? ' (me)' : '') + '</span>' +
         (t.isBot ? '' : '<span class="pill" style="margin-left:8px;">' + t.memberCount + '/' + t.maxMembers + '</span>') +
         (t.isBot ? '<span class="badge badge-bot">BOT</span>' : '') +
         (!t.connected && !t.isBot ? '<span class="badge badge-offline">OFFLINE</span>' : '');
@@ -237,6 +281,50 @@
       $('lobby-roster-full-hint').textContent =
         me.memberCount >= me.maxMembers ? 'Your team is full (' + me.maxMembers + '/' + me.maxMembers + ').' : 'Share the room code — ' + (me.maxMembers - me.memberCount) + ' more seat' + (me.maxMembers - me.memberCount === 1 ? '' : 's') + ' open on your team.';
     }
+  }
+
+  // ---------- how-to-play modal ----------
+  const HOWTO_SEEN_KEY = 'chipwar_seen_howto';
+  function openHowTo() { $('howto-modal').classList.add('active'); }
+  function closeHowTo() {
+    $('howto-modal').classList.remove('active');
+    localStorage.setItem(HOWTO_SEEN_KEY, '1');
+  }
+  $('btn-help-fab').addEventListener('click', openHowTo);
+  $('btn-howto-close').addEventListener('click', closeHowTo);
+  $('btn-howto-gotit').addEventListener('click', closeHowTo);
+  $('link-howto-join').addEventListener('click', (e) => { e.preventDefault(); openHowTo(); });
+  if (!localStorage.getItem(HOWTO_SEEN_KEY)) openHowTo();
+
+  // ---------- market shock + live rank preview ----------
+  function showShockLoading() {
+    $('shock-loading').style.display = 'flex';
+    $('shock-banner').style.display = 'none';
+  }
+  function renderShock(shock) {
+    $('shock-loading').style.display = 'none';
+    const el = $('shock-banner');
+    if (!shock) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'flex';
+    $('shock-tag').textContent = shock.categoryTag || 'MARKET';
+    $('shock-title').textContent = shock.title + (shock.source === 'ai' ? '' : '');
+    $('shock-desc').textContent = shock.description;
+    $('shock-impact').textContent = shock.impact || 'No numeric change this round.';
+  }
+  function renderRankPreview(preview) {
+    const el = $('rank-preview');
+    if (!preview) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'flex';
+    el.classList.remove('safe', 'caution', 'risk');
+    el.classList.add(preview.status);
+    const label = preview.status === 'safe' ? 'On track to sell out' : preview.status === 'caution' ? `Only ${preview.predictedSold}/${preview.offered} would sell` : preview.offered === 0 ? 'Offering 0 units — nothing will sell' : 'Priced/scored too low — likely 0 sold';
+    $('rank-preview-text').textContent = `Predicted rank: ${preview.rank}/${preview.totalTeams} — ${label}`;
   }
 
   // ---------- ticker ----------
@@ -265,45 +353,12 @@
       card.className = 'ticker-card' + (changed ? ' flash' : '') + (!t.connected && !t.isBot ? ' offline' : '');
       card.style.setProperty('border-left', '3px solid ' + colorFor(t.teamId));
       card.innerHTML =
-        '<div class="co">' + escapeHtml(t.teamName || t.companyName) + (t.teamId === myTeamId ? ' ★' : '') + '<span class="lock">' + (t.locked ? '🔒' : '⏳') + '</span></div>' +
-        '<div class="sub">' + escapeHtml(t.companyName) + '</div>' +
+        '<div class="co">' + escapeHtml(t.teamName) + (t.teamId === myTeamId ? ' ★' : '') + '<span class="lock"><span class="status-dot ' + (t.locked ? 'locked' : 'open') + '" title="' + (t.locked ? 'Locked' : 'Not locked yet') + '"></span></span></div>' +
         '<div class="row"><span>Price</span><b>$' + priceHtml + '</b></div>' +
         '<div class="row"><span>Qty</span><b>' + qtyHtml + '</b></div>' +
         '<div class="row"><span>Tech / Cap</span><b>Lv' + t.techLevel + ' / Lv' + t.capacityLevel + '</b></div>';
       el.appendChild(card);
     });
-  }
-
-  // ---------- market shock + live rank preview ----------
-  function showShockLoading() {
-    $('shock-loading').style.display = 'flex';
-    $('shock-banner').style.display = 'none';
-  }
-  function renderShock(shock) {
-    $('shock-loading').style.display = 'none';
-    const el = $('shock-banner');
-    if (!shock) {
-      el.style.display = 'none';
-      return;
-    }
-    el.style.display = 'flex';
-    el.classList.toggle('ai', shock.source === 'ai');
-    $('shock-icon').textContent = shock.icon || '⚡';
-    $('shock-title').textContent = shock.title;
-    $('shock-desc').textContent = shock.description;
-    $('shock-impact').textContent = shock.impact || 'No numeric change this round.';
-  }
-  function renderRankPreview(preview) {
-    const el = $('rank-preview');
-    if (!preview) {
-      el.style.display = 'none';
-      return;
-    }
-    el.style.display = 'flex';
-    el.classList.remove('safe', 'caution', 'risk');
-    el.classList.add(preview.status);
-    const label = preview.status === 'safe' ? 'On track to sell out' : preview.status === 'caution' ? `Only ${preview.predictedSold}/${preview.offered} would sell` : preview.offered === 0 ? 'Offering 0 units — nothing will sell' : 'Priced/scored too low — likely 0 sold';
-    $('rank-preview-text').textContent = `Predicted rank: ${preview.rank}/${preview.totalTeams} — ${label}`;
   }
 
   // ---------- game screen ----------
@@ -336,7 +391,7 @@
     const me = payload.teams.find((t) => t.teamId === myTeamId);
     if (!me) return;
 
-    $('hdr-me').textContent = me.companyName;
+    $('hdr-me').textContent = me.teamName;
     $('my-capital').textContent = money(me.capital);
     $('my-capital').className = 'v' + (me.capital < 0 ? ' neg' : '');
     $('my-inventory').textContent = me.inventory;
@@ -369,7 +424,7 @@
 
     $('btn-lockin').disabled = me.locked;
     $('btn-lockin').textContent = me.locked ? 'Locked in' : 'Lock In';
-    $('lockin-status').textContent = me.locked ? '🔒 Locked in — waiting for other teams…' : 'Final once locked in.';
+    $('lockin-status').textContent = me.locked ? 'Locked in — waiting for other teams…' : 'Final once locked in.';
     renderRankPreview(payload.phase === 'round_active' ? payload.preview : null);
   }
 
@@ -395,6 +450,27 @@
     else if (timeLeft <= 60) el.classList.add('warn');
   }
 
+  // ---------- round-winner celebration (geometric particles, no emoji) ----------
+  function triggerCelebration(revenue) {
+    const overlay = $('celebration-overlay');
+    const rain = $('money-rain');
+    rain.innerHTML = '';
+    for (let i = 0; i < 28; i++) {
+      const span = document.createElement('span');
+      span.className = 'money-particle' + (i % 3 === 0 ? ' alt' : '');
+      span.style.left = Math.random() * 100 + '%';
+      span.style.animationDuration = 1.6 + Math.random() * 1.4 + 's';
+      span.style.animationDelay = Math.random() * 0.6 + 's';
+      rain.appendChild(span);
+    }
+    $('celebration-sub').textContent = money(revenue) + ' revenue — best in the round';
+    overlay.classList.add('active');
+    setTimeout(() => {
+      overlay.classList.remove('active');
+      rain.innerHTML = '';
+    }, 3200);
+  }
+
   // ---------- results / game over ----------
   function renderResults(payload) {
     $('res-round').textContent = payload.round;
@@ -402,7 +478,7 @@
     const shockEl = $('res-shock-banner');
     if (payload.shock) {
       shockEl.style.display = 'flex';
-      $('res-shock-icon').textContent = payload.shock.icon || '⚡';
+      $('res-shock-tag').textContent = payload.shock.categoryTag || 'MARKET';
       $('res-shock-title').textContent = payload.shock.title;
       $('res-shock-desc').textContent = payload.shock.description;
       $('res-shock-impact').textContent = payload.shock.impact || 'No numeric change this round.';
@@ -415,9 +491,8 @@
       const tr = document.createElement('tr');
       if (r.teamId === myTeamId) tr.classList.add('me');
       if (idx === 0) tr.classList.add('winner');
-      const nameCell = '<b style="font-family:var(--display);">' + escapeHtml(r.teamName || r.companyName) + '</b> <span class="hint-text">(' + escapeHtml(r.companyName) + ')</span>';
       tr.innerHTML =
-        '<td>' + nameCell + '</td>' +
+        '<td><b style="font-family:var(--display);">' + escapeHtml(r.teamName) + '</b></td>' +
         '<td>$' + r.price + '</td>' +
         '<td>' + r.quantitySold + '</td>' +
         '<td>' + money(r.revenue) + '</td>' +
@@ -433,40 +508,16 @@
     }
   }
 
-  // ---------- round-winner celebration ----------
-  function triggerCelebration(revenue) {
-    const overlay = $('celebration-overlay');
-    const rain = $('money-rain');
-    rain.innerHTML = '';
-    const emojis = ['💵', '💰', '🤑'];
-    for (let i = 0; i < 26; i++) {
-      const span = document.createElement('span');
-      span.className = 'money-emoji';
-      span.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-      span.style.left = Math.random() * 100 + '%';
-      span.style.animationDuration = 1.6 + Math.random() * 1.4 + 's';
-      span.style.animationDelay = Math.random() * 0.6 + 's';
-      rain.appendChild(span);
-    }
-    $('celebration-sub').textContent = money(revenue) + ' revenue — best in the round!';
-    overlay.classList.add('active');
-    setTimeout(() => {
-      overlay.classList.remove('active');
-      rain.innerHTML = '';
-    }, 3200);
-  }
-
   function renderGameOver(payload) {
-    $('final-winner-banner').textContent = payload.winner ? '🏆 ' + (payload.winner.teamName || payload.winner.companyName) + ' wins' : 'Game over';
+    $('final-winner-banner').textContent = payload.winner ? payload.winner.teamName + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
     payload.leaderboard.forEach((t, idx) => {
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
-      const nameLine = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName || t.companyName) + '</b> <span class="hint-text" style="font-weight:400;">(' + escapeHtml(t.companyName) + ')</span>';
       row.innerHTML =
         '<div class="rank">' + (idx + 1) + '</div>' +
-        '<div class="name">' + nameLine +
+        '<div class="name"><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' (+' + money(t.inventory * 10) + ') · tech Lv' + t.techLevel + ' (+' + money(t.techLevel * 500) + ') · capacity Lv' + t.capacityLevel + ' (+' + money(t.capacityLevel * 500) + ')</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
       el.appendChild(row);
@@ -499,7 +550,7 @@
     history.forEach((h) =>
       h.results.forEach((r) => {
         if (!(r.teamId in teamMeta)) teamIds.push(r.teamId);
-        teamMeta[r.teamId] = r.companyName;
+        teamMeta[r.teamId] = r.teamName;
       })
     );
     const seriesFor = (pick) =>
@@ -526,10 +577,10 @@
 
   function downloadMatchCSV() {
     if (!lastHistory || !lastHistory.length) return;
-    const rows = [['round', 'marketPrice', 'shockTitle', 'teamName', 'companyName', 'price', 'quantityOffered', 'quantitySold', 'revenue', 'unsoldInventory', 'capital', 'techLevel', 'capacityLevel', 'competitiveScore']];
+    const rows = [['round', 'marketPrice', 'shockTitle', 'teamName', 'price', 'quantityOffered', 'quantitySold', 'revenue', 'unsoldInventory', 'capital', 'techLevel', 'capacityLevel', 'competitiveScore']];
     lastHistory.forEach((h) => {
       h.results.forEach((r) => {
-        rows.push([h.round, h.marketPrice, h.shock ? h.shock.title : '', r.teamName || '', r.companyName, r.price, r.quantityOffered, r.quantitySold, r.revenue, r.unsoldInventory, r.capital, r.techLevel, r.capacityLevel, r.competitiveScore]);
+        rows.push([h.round, h.marketPrice, h.shock ? h.shock.title : '', r.teamName, r.price, r.quantityOffered, r.quantitySold, r.revenue, r.unsoldInventory, r.capital, r.techLevel, r.capacityLevel, r.competitiveScore]);
       });
     });
     const csv = rows
@@ -552,13 +603,14 @@
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+  $('btn-download-csv').addEventListener('click', downloadMatchCSV);
 
   // ---------- chat ----------
   function appendChat(msg) {
     const log = $('chat-log');
     const row = document.createElement('div');
     row.className = 'chat-msg';
-    row.innerHTML = '<span class="who" style="color:' + colorFor(msg.name) + '">' + msg.name + ':</span> ' + escapeHtml(msg.text);
+    row.innerHTML = '<span class="who" style="color:' + colorFor(msg.name) + '">' + escapeHtml(msg.name) + ':</span> ' + escapeHtml(msg.text);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
@@ -567,12 +619,9 @@
     const row = document.createElement('div');
     row.className = 'chat-msg';
     row.style.color = 'var(--red)';
-    row.textContent = '⚠️ ' + text;
+    row.textContent = text;
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
-  }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
   function sendChat() {
     const input = $('chat-input');
@@ -582,22 +631,7 @@
     input.value = '';
   }
 
-  // ---------- how-to-play modal ----------
-  const HOWTO_SEEN_KEY = 'chipwar_seen_howto';
-  function openHowTo() { $('howto-modal').classList.add('active'); }
-  function closeHowTo() {
-    $('howto-modal').classList.remove('active');
-    localStorage.setItem(HOWTO_SEEN_KEY, '1');
-  }
-  $('btn-help-fab').addEventListener('click', openHowTo);
-  $('btn-howto-close').addEventListener('click', closeHowTo);
-  $('btn-howto-gotit').addEventListener('click', closeHowTo);
-  $('link-howto-join').addEventListener('click', (e) => { e.preventDefault(); openHowTo(); });
-  if (!localStorage.getItem(HOWTO_SEEN_KEY)) openHowTo();
-
   // ---------- wire up ----------
-  $('btn-join').addEventListener('click', doJoin);
-  ['in-roomcode', 'in-teamname'].forEach((id) => $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); }));
   $('btn-buy-tech').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
   $('btn-buy-cap').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
   $('btn-undo-tech').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
@@ -608,29 +642,17 @@
     const price = Number($('in-price').value) || 0;
     const qty = Number($('in-qty').value) || 0;
     let warning = null;
-    if (qty === 0 && price === 0) warning = "You're about to lock in with $0 price AND 0 units offered — Apple can't buy anything from you this round. Continue anyway?";
-    else if (qty === 0) warning = "You're about to lock in with 0 units offered — Apple can't buy anything from you this round. Continue anyway?";
-    else if (price === 0) warning = "You're about to lock in with a $0 price — Apple would get your chips for free. Continue anyway?";
-    if (warning && !confirm(warning)) return;
+    if (qty === 0 && price === 0) warning = "You're about to lock in with $0 price AND 0 units offered — Apple can't buy anything from you this round.";
+    else if (qty === 0) warning = "You're about to lock in with 0 units offered — Apple can't buy anything from you this round.";
+    else if (price === 0) warning = "You're about to lock in with a $0 price — Apple would get your chips for free.";
+    if (warning) {
+      showConfirm('Lock in anyway?', warning, 'Lock In Anyway', () => socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId }));
+      return;
+    }
     socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId });
   });
   $('btn-chat-send').addEventListener('click', sendChat);
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
-  function leaveRoom() {
-    if (!confirm('Leave this room?')) return;
-    socket.emit('LEAVE_ROOM', { roomCode: myRoomCode, teamId: myTeamId, memberId: myMemberId });
-    forgetSession();
-    $('in-roomcode').value = '';
-    $('in-teamname').value = '';
-    activateScreen('screen-join');
-  }
-  $('btn-leave-room').addEventListener('click', leaveRoom);
-  $('btn-leave-room-final').addEventListener('click', leaveRoom);
-  $('btn-exit-blocked').addEventListener('click', () => {
-    $('in-roomcode').value = '';
-    activateScreen('screen-join');
-  });
-  $('btn-download-csv').addEventListener('click', downloadMatchCSV);
 
   socket.on('LOBBY_UPDATE', (payload) => {
     if (!myTeamId || !payload.teams.some((t) => t.teamId === myTeamId)) return;
@@ -663,14 +685,18 @@
   socket.on('CHAT_MESSAGE', appendChat);
   socket.on('CHAT_BLOCKED', ({ reason }) => appendSystemChat(reason || 'Message blocked.'));
   socket.on('ROOM_CLOSED', ({ reason }) => {
-    alert(reason || 'The host has closed this room.');
-    forgetSession();
-    activateScreen('screen-join');
+    showConfirm('Room closed', reason || 'The host has closed this room.', 'OK', () => {
+      forgetSession();
+      showStep('roomcode');
+      activateScreen('screen-join');
+    }, { noCancel: true, neutral: true });
   });
   socket.on('KICKED', ({ reason }) => {
-    alert(reason || 'You were removed from this room.');
-    forgetSession();
-    activateScreen('screen-join');
+    showConfirm('Removed from room', reason || 'You were removed from this room.', 'OK', () => {
+      forgetSession();
+      showStep('roomcode');
+      activateScreen('screen-join');
+    }, { noCancel: true, neutral: true });
   });
 
   // Tooltips open on hover on desktop; on touch devices, tap to toggle,
@@ -687,6 +713,6 @@
     }
   });
 
-  renderCompanyOptions();
+  showStep('roomcode');
   tryAutoRejoin();
 })();

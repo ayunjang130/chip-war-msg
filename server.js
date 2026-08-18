@@ -64,11 +64,10 @@ function teamIsConnected(team) {
   return team.members.some((m) => m.connected);
 }
 
-function createTeamState(teamId, teamName, companyName, startingCapital, isBot = false, botStrategy = null) {
+function createTeamState(teamId, teamName, startingCapital, isBot = false, botStrategy = null) {
   return {
     teamId,
     teamName,
-    companyName,
     members: [], // {memberId, socketId, memberName, connected} - up to MAX_MEMBERS_PER_TEAM
     isBot,
     botStrategy,
@@ -134,7 +133,6 @@ function publicTeam(team, viewerTeamId, isPrivileged, room) {
   return {
     teamId: team.teamId,
     teamName: team.teamName,
-    companyName: team.companyName,
     connected: teamIsConnected(team),
     isBot: team.isBot,
     memberCount: team.members.length,
@@ -213,7 +211,6 @@ function broadcastLobby(room) {
     teams: Object.values(room.teams).map((t) => ({
       teamId: t.teamId,
       teamName: t.teamName,
-      companyName: t.companyName,
       connected: teamIsConnected(t),
       isBot: t.isBot,
       memberCount: t.members.length,
@@ -231,7 +228,7 @@ function broadcastLobby(room) {
 
 function publicShock(shock, detailed) {
   if (!shock) return null;
-  const base = { title: shock.title, icon: shock.icon, description: shock.description, source: shock.source, impact: engine.summarizeShockImpact(shock.effects) };
+  const base = { title: shock.title, categoryTag: shock.categoryTag, description: shock.description, source: shock.source, impact: engine.summarizeShockImpact(shock.effects) };
   return detailed ? { ...base, effects: shock.effects } : base;
 }
 
@@ -289,9 +286,8 @@ function roomUpgradeCost(room, kind, currentLevel) {
 
 const SHOCK_SCHEMA_HINT = `Respond with ONLY one JSON object - no markdown fences, no commentary before or after - shaped exactly like this:
 {
-  "title": "short punchy name, max 6 words",
-  "icon": "one single emoji",
-  "description": "one sentence, under 160 characters, written for 15-18 year olds, explaining what happened and what it changes this round",
+  "title": "short punchy name, max 6 words, no emoji",
+  "description": "one sentence, under 160 characters, written like a clean business-news headline for 15-18 year olds - clear and a little dramatic, but no emoji and no cutesy language",
   "effects": {
     "capacityProductionMultiplier": number 0.5-1.5 (1 = no change; below 1 hurts teams who invested in Capacity, above 1 helps them),
     "techUpgradeCostMultiplier": number 0.5-2.0 (1 = no change),
@@ -535,7 +531,6 @@ function resolveRound(room) {
       return {
         teamId: team.teamId,
         teamName: team.teamName,
-        companyName: team.companyName,
         price: r.price,
         quantityOffered: entries.find((e) => e.teamId === team.teamId).quantity,
         quantitySold: r.purchased,
@@ -580,7 +575,6 @@ function endGame(room) {
     .map((t) => ({
       teamId: t.teamId,
       teamName: t.teamName,
-      companyName: t.companyName,
       capital: Math.round(t.capital),
       inventory: t.inventory,
       techLevel: t.techLevel,
@@ -662,11 +656,11 @@ io.on('connection', (socket) => {
         phase: room.phase,
         teams: Object.values(room.teams)
           .filter((t) => !t.isBot)
-          .map((t) => ({ teamId: t.teamId, teamName: t.teamName, companyName: t.companyName, memberCount: t.members.length, maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM }))
+          .map((t) => ({ teamId: t.teamId, teamName: t.teamName, memberCount: t.members.length, maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM }))
       });
   });
 
-  socket.on('JOIN_ROOM', ({ roomCode, teamName, companyName, teamId, memberId, memberName }, cb) => {
+  socket.on('JOIN_ROOM', ({ roomCode, teamName, teamId, memberId, memberName }, cb) => {
     const room = rooms[roomCode];
     if (!room) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
 
@@ -721,35 +715,42 @@ io.on('connection', (socket) => {
       return cb && cb({ ok: false, error: 'ROOM_FULL' });
     }
     const id = genId('team');
-    const base = (companyName || 'Company').trim() || 'Company';
-    const taken = new Set(Object.values(room.teams).map((t) => t.companyName));
+    const base = (teamName || `Team ${Object.keys(room.teams).length + 1}`).trim() || `Team ${Object.keys(room.teams).length + 1}`;
+    const taken = new Set(Object.values(room.teams).map((t) => t.teamName));
     let candidate = base;
     let suffix = 1;
     while (taken.has(candidate)) {
       suffix += 1;
       candidate = `${base} ${suffix}`;
     }
-    const cleanTeamName = (teamName || `Team ${Object.keys(room.teams).length + 1}`).trim();
-    const team = createTeamState(id, cleanTeamName, candidate, room.config.startingCapital);
+    const team = createTeamState(id, candidate, room.config.startingCapital);
     room.teams[id] = team;
-    const newMemberId = addMember(team, socket.id, memberName || teamName);
+    // The join screen only asks the creator for ONE name (the team's), so
+    // default their own roster entry to match it unless they separately
+    // gave a personal name.
+    const newMemberId = addMember(team, socket.id, memberName || candidate);
     finishJoin(team, newMemberId);
   });
 
-  // A player backing out of a room. Allowed in the lobby (before a match
-  // starts) and after game_over (once it's fully done) - NOT mid-match,
-  // since a team mid-round has already affected production/history that
-  // shouldn't just vanish; disconnect (tab close) covers that case instead.
-  // Removes only the requesting member - if that was the last one, the
-  // team itself goes too.
+  // A player leaving mid-member (this specific person exits their seat -
+  // if teammates remain, the company keeps going exactly as before). Now
+  // allowed at ANY phase, including mid-round: leaving doesn't touch the
+  // team's game state (capital/inventory/price), it just removes one
+  // person's seat, so it's no more disruptive than that person simply
+  // disconnecting - which was already always allowed.
   socket.on('LEAVE_ROOM', ({ roomCode, teamId, memberId }) => {
     const room = rooms[roomCode];
-    if (!room || (room.phase !== 'lobby' && room.phase !== 'game_over')) return;
+    if (!room) return;
     const team = room.teams[teamId];
     if (!team) return;
     team.members = team.members.filter((m) => m.memberId !== memberId);
     delete socketMeta[socket.id];
-    if (team.members.length === 0) delete room.teams[teamId];
+    // Only delete the team object itself pre-match, when an empty team has
+    // no history/results tied to it yet. Once a match is running, a team
+    // that loses its last member just keeps existing in an unmanned state
+    // (identical to a fully-disconnected team), so round history, the CSV
+    // export, and the leaderboard all stay consistent.
+    if (team.members.length === 0 && room.phase === 'lobby') delete room.teams[teamId];
     broadcastLobby(room);
     broadcastState(room);
   });
@@ -843,7 +844,7 @@ io.on('connection', (socket) => {
       const member = findMemberBySocket(sender, socket.id);
       // Only disambiguate by member name once a team actually HAS more than
       // one person - keeps the common single-member case exactly as before.
-      name = sender.companyName + (member && sender.members.length > 1 ? ` (${member.memberName})` : '');
+      name = sender.teamName + (member && sender.members.length > 1 ? ` (${member.memberName})` : '');
     }
     const msg = { id: genId('msg'), name, text: trimmed, at: Date.now() };
     room.chatLog.push(msg);
@@ -888,8 +889,11 @@ io.on('connection', (socket) => {
     const room = rooms[roomCode];
     if (!room || socket.id !== room.hostSocketId || room.phase !== 'lobby') return;
     if (Object.keys(room.teams).length >= room.config.maxTeams) return;
+    // Bots keep the chip-company-flavored names on purpose - it's the one
+    // place those identities still make sense, now that human teams pick
+    // their own plain team name instead of a cosmetic company skin.
     const label = strategy === 'tech' ? 'NVIDIA-Bot' : strategy === 'capacity' ? 'TSMC-Bot' : 'Samsung-Bot';
-    const taken = new Set(Object.values(room.teams).map((t) => t.companyName));
+    const taken = new Set(Object.values(room.teams).map((t) => t.teamName));
     let name = label;
     let n = 1;
     while (taken.has(name)) {
@@ -897,7 +901,7 @@ io.on('connection', (socket) => {
       name = `${label} ${n}`;
     }
     const id = genId('bot');
-    room.teams[id] = createTeamState(id, name, name, room.config.startingCapital, true, strategy || 'balanced');
+    room.teams[id] = createTeamState(id, name, room.config.startingCapital, true, strategy || 'balanced');
     broadcastLobby(room);
     broadcastState(room);
   });

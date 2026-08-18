@@ -205,7 +205,7 @@ function calcCompanyValue(team) {
  * MARKET SHOCKS ("오점 1" fix) - a per-round modifier that stops every match
  * from converging on the same "max invest early, dump late" build order.
  *
- * A shock is: { title, icon, description, effects, source }
+ * A shock is: { title, description, categoryTag, effects, source }
  * effects is always the same shape regardless of where the shock came from
  * (hand-written template below, or an AI-generated one in server.js), which
  * is what lets sanitizeShock() validate AI output with the exact same rules
@@ -220,7 +220,6 @@ function calcCompanyValue(team) {
 
 const NEUTRAL_SHOCK = Object.freeze({
   title: 'Calm Market',
-  icon: '🌤️',
   description: 'No major disruptions this round — standard rules apply.',
   effects: Object.freeze({
     capacityProductionMultiplier: 1,
@@ -250,7 +249,6 @@ function getShockTemplates() {
     {
       id: 'supply_crisis',
       title: 'Supply Chain Crisis',
-      icon: '⚠️',
       build() {
         const m = roll(0.45, 0.75);
         return { effects: { capacityProductionMultiplier: m }, description: `A key supplier just went dark. Everyone's Capacity efficiency takes a ${pct(m)}% hit this round.` };
@@ -259,7 +257,6 @@ function getShockTemplates() {
     {
       id: 'capacity_boom',
       title: 'Logistics Breakthrough',
-      icon: '⚙️',
       build() {
         const m = roll(1.15, 1.45);
         return { effects: { capacityProductionMultiplier: m }, description: `A new shipping shortcut just opened up — Capacity efficiency jumps ${pct(m)}% this round!` };
@@ -268,7 +265,6 @@ function getShockTemplates() {
     {
       id: 'apple_quality_push',
       title: "Apple's Quality Push",
-      icon: '🍎',
       build() {
         const m = roll(1.5, 2.3);
         return { effects: { weightBias: { tech: m } }, description: `Apple's engineers are obsessing over specs this round — Tech scores hit different.` };
@@ -277,7 +273,6 @@ function getShockTemplates() {
     {
       id: 'apple_value_push',
       title: "Apple's Value Push",
-      icon: '💵',
       build() {
         const m = roll(1.4, 2.0);
         return { effects: { weightBias: { price: m } }, description: `Apple's CFO is on a cost-cutting rampage this round — Price just became king.` };
@@ -286,7 +281,6 @@ function getShockTemplates() {
     {
       id: 'reliability_focus',
       title: 'Reliability Focus',
-      icon: '🔧',
       build() {
         const m = roll(1.5, 2.2);
         return { effects: { weightBias: { capacity: m } }, description: `Apple wants proof you can actually deliver at scale — Capacity is the flex this round.` };
@@ -295,7 +289,6 @@ function getShockTemplates() {
     {
       id: 'chip_glut',
       title: 'Chip Glut',
-      icon: '📦',
       build() {
         const m = roll(0.55, 0.75);
         return { effects: { demandMultiplier: m }, description: `Apple's warehouses are already stuffed — total demand shrinks ${pct(m)}% this round.` };
@@ -304,7 +297,6 @@ function getShockTemplates() {
     {
       id: 'emergency_restock',
       title: 'Emergency Restock',
-      icon: '🚨',
       build() {
         const m = roll(1.3, 1.75);
         return { effects: { demandMultiplier: m }, description: `A surprise hit product just sold out — Apple is scrambling for ${pct(m)}% more chips!` };
@@ -313,7 +305,6 @@ function getShockTemplates() {
     {
       id: 'talent_war',
       title: 'Talent War',
-      icon: '🧠',
       build() {
         const m = roll(1.4, 1.9);
         return { effects: { techUpgradeCostMultiplier: m }, description: `Rivals are poaching engineers left and right — Tech upgrades cost ${pct(m)}% more this round.` };
@@ -322,7 +313,6 @@ function getShockTemplates() {
     {
       id: 'rd_grant',
       title: 'R&D Grant',
-      icon: '🎓',
       build() {
         const m = roll(0.5, 0.7);
         return { effects: { techUpgradeCostMultiplier: m }, description: `A fat government grant just landed — Tech upgrades are ${pct(m)}% cheaper this round.` };
@@ -331,7 +321,6 @@ function getShockTemplates() {
     {
       id: 'factory_subsidy',
       title: 'Factory Subsidy',
-      icon: '🏗️',
       build() {
         const m = roll(0.5, 0.7);
         return { effects: { capacityUpgradeCostMultiplier: m }, description: `Free money from the local government — Capacity upgrades are ${pct(m)}% cheaper this round.` };
@@ -340,7 +329,6 @@ function getShockTemplates() {
     {
       id: 'import_tariff',
       title: 'Import Tariff',
-      icon: '🛃',
       build() {
         const m = roll(1.4, 1.9);
         return { effects: { capacityUpgradeCostMultiplier: m }, description: `New tariffs just hit fab equipment — Capacity upgrades cost ${pct(m)}% more this round.` };
@@ -349,7 +337,6 @@ function getShockTemplates() {
     {
       id: 'quality_scandal',
       title: "Rival's Quality Scandal",
-      icon: '🔍',
       build() {
         const m = roll(0.5, 0.7);
         return { effects: { weightBias: { tech: m } }, description: `A competitor just got caught cutting corners — buyers are distracted, Tech matters a bit less.` };
@@ -358,14 +345,32 @@ function getShockTemplates() {
     {
       id: 'budget_slack',
       title: 'Budget Slack',
-      icon: '💰',
       build() {
         const m = roll(0.5, 0.7);
         return { effects: { weightBias: { price: m } }, description: `Apple found some spare change in the couch cushions — Price matters a little less this round.` };
       }
     },
-    { id: 'calm_market', title: NEUTRAL_SHOCK.title, icon: NEUTRAL_SHOCK.icon, weight: 4, build: () => ({ effects: {}, description: 'Nothing dramatic in the news today — standard rules apply.' }) }
+    { id: 'calm_market', title: NEUTRAL_SHOCK.title, weight: 4, build: () => ({ effects: {}, description: 'Nothing dramatic in the news today — standard rules apply.' }) }
   ];
+}
+
+/**
+ * A short, ALWAYS-consistent category tag derived from a shock's actual
+ * numeric effects - never a free-text or emoji field from a template or
+ * the AI, so it can never look like a random pictograph or drift out of
+ * sync with what the shock actually does. Priority order below just picks
+ * the most prominent lever when a shock happens to touch more than one.
+ */
+function shockCategoryTag(effects) {
+  if (!effects) return 'MARKET';
+  if (effects.capacityProductionMultiplier != null && effects.capacityProductionMultiplier !== 1) return 'CAPACITY';
+  if ((effects.techUpgradeCostMultiplier != null && effects.techUpgradeCostMultiplier !== 1) || (effects.capacityUpgradeCostMultiplier != null && effects.capacityUpgradeCostMultiplier !== 1)) {
+    return 'COST';
+  }
+  if (effects.demandMultiplier != null && effects.demandMultiplier !== 1) return 'DEMAND';
+  const b = effects.weightBias || {};
+  if ((b.price != null && b.price !== 1) || (b.tech != null && b.tech !== 1) || (b.capacity != null && b.capacity !== 1)) return 'PRIORITY';
+  return 'MARKET';
 }
 
 /**
@@ -402,28 +407,28 @@ function sanitizeShock(raw, source) {
   const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 60) : '';
   const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 220) : '';
   if (!title || !description) return null;
-  const icon = typeof raw.icon === 'string' && raw.icon.trim() ? raw.icon.trim().slice(0, 4) : '⚡';
   const e = raw.effects && typeof raw.effects === 'object' ? raw.effects : {};
   const bias = e.weightBias && typeof e.weightBias === 'object' ? e.weightBias : {};
   const clamp = (v, lo, hi) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : 1;
   };
+  const effects = {
+    capacityProductionMultiplier: clamp(e.capacityProductionMultiplier, 0.4, 1.6),
+    techUpgradeCostMultiplier: clamp(e.techUpgradeCostMultiplier, 0.5, 2.0),
+    capacityUpgradeCostMultiplier: clamp(e.capacityUpgradeCostMultiplier, 0.5, 2.0),
+    demandMultiplier: clamp(e.demandMultiplier, 0.6, 1.8),
+    weightBias: {
+      price: clamp(bias.price, 0.4, 2.5),
+      tech: clamp(bias.tech, 0.4, 2.5),
+      capacity: clamp(bias.capacity, 0.4, 2.5)
+    }
+  };
   return {
     title,
     description,
-    icon,
-    effects: {
-      capacityProductionMultiplier: clamp(e.capacityProductionMultiplier, 0.4, 1.6),
-      techUpgradeCostMultiplier: clamp(e.techUpgradeCostMultiplier, 0.5, 2.0),
-      capacityUpgradeCostMultiplier: clamp(e.capacityUpgradeCostMultiplier, 0.5, 2.0),
-      demandMultiplier: clamp(e.demandMultiplier, 0.6, 1.8),
-      weightBias: {
-        price: clamp(bias.price, 0.4, 2.5),
-        tech: clamp(bias.tech, 0.4, 2.5),
-        capacity: clamp(bias.capacity, 0.4, 2.5)
-      }
-    },
+    categoryTag: shockCategoryTag(effects),
+    effects,
     source: source || 'procedural'
   };
 }
@@ -440,7 +445,7 @@ function pickProceduralShock(recentTitles) {
   if (pool.length === 0) pool = templates; // everything was used recently - allow a repeat rather than break
   const chosen = pool[Math.floor(Math.random() * pool.length)];
   const built = chosen.build();
-  return sanitizeShock({ title: chosen.title, icon: chosen.icon, description: built.description, effects: built.effects }, 'procedural');
+  return sanitizeShock({ title: chosen.title, description: built.description, effects: built.effects }, 'procedural');
 }
 
 function getEffectiveWeights(baseWeights, shock) {
@@ -546,6 +551,7 @@ module.exports = {
   NEUTRAL_SHOCK,
   sanitizeShock,
   pickProceduralShock,
+  shockCategoryTag,
   summarizeShockImpact,
   parseShockResponseText,
   getEffectiveWeights,

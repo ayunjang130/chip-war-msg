@@ -88,8 +88,45 @@ for 30+ minutes, so long-running public deployments don't leak memory.
       touch); the buttons and live numbers are what's left on screen
 - [x] "How to Play" rewritten as 4 short, complete-sentence steps instead
       of a stack of loosely-related paragraphs
-- [x] Up to 4 people can share control of one team/company - the join
-      screen shows existing teams with open seats, not just "create new"
+- [x] Up to 4 people can share control of one team - the join screen shows
+      existing teams with open seats, not just "create new"
+- [x] Leave Game is available on every screen, including mid-match, and
+      goes through the custom confirm modal (not a browser popup)
+- [x] Every confirm/destructive action (Leave, Kick, Destroy Room, Lock In
+      with $0 price/qty) uses one shared in-app confirm modal - no native
+      `confirm()`/`alert()` anywhere in the app
+- [x] Cosmetic company names (Samsung/Intel/etc.) are gone from the player
+      join flow entirely - a team has exactly one name, which its creator
+      picks. Those identities now exist ONLY as bot display names
+      (NVIDIA-Bot, TSMC-Bot, Samsung-Bot)
+- [x] Join flow is a 4-step wizard (room code → choose create-or-join →
+      the one relevant form) instead of one screen showing everything at
+      once, each step with a Back button
+- [x] No emoji anywhere in the UI - lock status is a small CSS dot, market
+      shocks show a computed category tag (CAPACITY/COST/DEMAND/PRIORITY/
+      MARKET) instead of a random icon, the round-winner celebration uses
+      falling gold/green geometric particles instead of money emoji
+
+## Team names replace "team name + cosmetic company name"
+
+`companyName` is gone from the data model entirely - `team.teamName` is
+now the only identity a team has, chosen once by whoever creates it via
+`JOIN_ROOM`. Every place that used to show `"CompanyName (teamName)"` now
+shows just the team name. Duplicate-name protection (append " 2", " 3", …)
+now keys off `teamName` instead. Bots are the one exception: they still
+get named from the chip-company list (`NVIDIA-Bot`, `TSMC-Bot`,
+`Samsung-Bot`) since that's the one place the flavor still fits, and bots
+were never going through the player join flow anyway.
+
+## Custom confirm modal (no native browser popups)
+
+`showConfirm(title, message, confirmLabel, onConfirm, opts)` in both
+`player.js` and `host.js` renders a small red-accented in-app modal instead
+of calling `confirm()`/`alert()`. `opts.noCancel` turns it into a plain
+notice (used for "room closed" / "you were kicked"); `opts.neutral` swaps
+the red accent for gold on those non-destructive notices. Every
+irreversible action in the app - Leave Game, Kick, Destroy Room, and
+locking in at $0 - routes through this one component.
 
 ## Multi-person teams (up to 4 people per company)
 
@@ -107,11 +144,15 @@ that lists teams with open seats (bots excluded - joining a bot doesn't
 make sense). Picking one calls `JOIN_ROOM` with that `teamId` but no
 `memberId`, which the server treats as "seat this new person on an
 existing team" - allowed at *any* match phase, since adding a hand to an
-already-playing company doesn't touch production/investment history the
-way spawning a brand-new team mid-match would (that path is still
-lobby-only). Each browser stores its own `{roomCode, teamId, memberId}` in
-localStorage, so reconnecting (page reload, dropped wifi) restores that
-specific person's seat rather than looking like a new join.
+already-playing team doesn't touch production/investment history the way
+spawning a brand-new team mid-match would (that path is still lobby-only).
+Leaving (`LEAVE_ROOM`) is now also allowed at any phase for the same
+reason - it only ever removes one member's seat, never deletes a team's
+game state once a match has started, so history/CSV/leaderboard stay
+consistent even if a team ends up with zero connected members mid-match.
+Each browser stores its own `{roomCode, teamId, memberId}` in localStorage,
+so reconnecting (page reload, dropped wifi) restores that specific
+person's seat rather than looking like a new join.
 
 ## Total Apple Demand — visible without the host screen
 

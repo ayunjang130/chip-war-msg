@@ -15,37 +15,70 @@
 <section id="screen-join" class="screen active">
   <div class="wrap" style="max-width:480px; padding-top:64px;">
     <p class="eyebrow">chip war · msg v2.0</p>
-    <h1>Join a match</h1>
-    <p>Enter the room code your host shared. Up to 4 people can share one company.</p>
-    <div class="card" style="margin-top:22px;">
-      <div class="field">
-        <label for="in-roomcode">Room code</label>
-        <input id="in-roomcode" maxlength="5" placeholder="e.g. K7QXM" autocomplete="off" style="text-transform:uppercase; letter-spacing:.12em; font-size:18px;">
+
+    <!-- STEP 1: room code -->
+    <div id="step-roomcode">
+      <h1>Join a match</h1>
+      <p>Enter the room code your host shared.</p>
+      <div class="card" style="margin-top:22px;">
+        <div class="field">
+          <label for="in-roomcode">Room code</label>
+          <input id="in-roomcode" maxlength="5" placeholder="e.g. K7QXM" autocomplete="off" style="text-transform:uppercase; letter-spacing:.12em; font-size:18px;">
+        </div>
+        <button class="btn btn-gold btn-block" id="btn-find-room">Continue</button>
+        <div class="error-text" id="lookup-error"></div>
       </div>
-      <div class="error-text" id="lookup-error"></div>
     </div>
 
-    <div id="existing-teams-card" class="card" style="display:none; margin-top:16px;">
-      <h3>Join an existing company</h3>
-      <div id="existing-teams-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+    <!-- STEP 2: choice -->
+    <div id="step-choice" style="display:none;">
+      <button class="btn-back" data-back="roomcode">‹ Back</button>
+      <h1>Room <span id="choice-roomcode" style="color:var(--gold)"></span></h1>
+      <p>How do you want to join?</p>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
+        <button class="choice-card" id="choice-create">
+          <div><div class="t">Create a new team</div><div class="d" id="choice-create-note">Name your team and start fresh</div></div>
+          <span class="arrow">›</span>
+        </button>
+        <button class="choice-card" id="choice-join">
+          <div><div class="t">Join an existing team</div><div class="d" id="choice-join-note">0 teams have an open seat</div></div>
+          <span class="arrow">›</span>
+        </button>
+      </div>
     </div>
 
-    <div id="new-team-card" class="card" style="margin-top:16px;">
-      <h3>Start a new company</h3>
-      <div class="field">
-        <label for="in-teamname">Your name</label>
-        <input id="in-teamname" maxlength="20" placeholder="e.g. Alex" autocomplete="off">
+    <!-- STEP 3a: create -->
+    <div id="step-create" style="display:none;">
+      <button class="btn-back" data-back="choice">‹ Back</button>
+      <h1>Name your team</h1>
+      <p>Up to 4 people can join this team later with the same room code.</p>
+      <div class="card" style="margin-top:16px;">
+        <div class="field">
+          <label for="in-teamname">Team name</label>
+          <input id="in-teamname" maxlength="20" placeholder="e.g. Team Alpha" autocomplete="off">
+        </div>
+        <button class="btn btn-gold btn-block" id="btn-join">Create team</button>
+        <div class="error-text" id="join-error"></div>
       </div>
-      <div class="field">
-        <label>Company identity <span style="text-transform:none; letter-spacing:0;">(cosmetic only)</span></label>
-        <div class="company-select" id="company-select"></div>
-      </div>
-      <button class="btn btn-gold btn-block" id="btn-join" style="margin-top:6px;">Create &amp; join</button>
-      <div class="error-text" id="join-error"></div>
-      <p class="hint-text" id="new-team-blocked-note" style="display:none;">This match already started — you can still join an existing company above.</p>
     </div>
 
-    <p class="footer-note"><a href="#" id="link-howto-join">New here? See how the game works (30 seconds) →</a></p>
+    <!-- STEP 3b: join existing -->
+    <div id="step-join" style="display:none;">
+      <button class="btn-back" data-back="choice">‹ Back</button>
+      <h1>Pick a team</h1>
+      <p>Select the team you want to join.</p>
+      <div id="existing-teams-list" style="margin-top:14px; display:flex; flex-direction:column; gap:8px;"></div>
+      <div class="card" style="margin-top:14px;">
+        <div class="field">
+          <label for="in-membername">Your name</label>
+          <input id="in-membername" maxlength="20" placeholder="e.g. Alex" autocomplete="off">
+        </div>
+        <button class="btn btn-gold btn-block" id="btn-join-existing" disabled>Join team</button>
+        <div class="error-text" id="join-existing-error"></div>
+      </div>
+    </div>
+
+    <p class="footer-note" style="margin-top:22px;"><a href="#" id="link-howto-join">New here? See how the game works (30 seconds) →</a></p>
     <p class="footer-note">Hosting instead? Open <b>/host</b> on this same server.</p>
   </div>
 </section>
@@ -55,18 +88,18 @@
   <div class="wrap" style="max-width:560px; padding-top:56px;">
     <p class="eyebrow">waiting room</p>
     <h1 id="lobby-company">—</h1>
-    <p>You're in. The host will start the match once enough companies have joined.</p>
+    <p>You're in. The host will start the match once enough teams have joined.</p>
     <div class="card" style="margin-top:20px;">
-      <h3>Room <span id="lobby-roomcode" style="color:var(--gold)"></span> — companies (<span id="lobby-count">0</span>)</h3>
+      <h3>Room <span id="lobby-roomcode" style="color:var(--gold)"></span> — teams (<span id="lobby-count">0</span>)</h3>
       <div id="lobby-team-list" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
     </div>
     <div class="card" id="lobby-roster-card">
-      <h3>Your teammates <span class="info-tip" data-tip="Up to 4 people can share one company. Anyone on the team can set price/quantity, invest, and lock in — it's shared control, so coordinate out loud or in the chat once the round starts.">i</span></h3>
+      <h3>Your teammates <span class="info-tip" data-tip="Up to 4 people can share one team. Anyone on the team can set price/quantity, invest, and lock in — it's shared control, so coordinate out loud or in the chat once the round starts.">i</span></h3>
       <div id="lobby-roster-list" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
       <p class="hint-text" id="lobby-roster-full-hint"></p>
     </div>
     <div class="center-msg" id="lobby-waiting-msg">Waiting for host to start Round 1…</div>
-    <button class="btn btn-block" id="btn-leave-room" style="margin-top:14px;">Exit This Room</button>
+    <button class="btn btn-block" id="btn-leave-room" style="margin-top:14px;">Leave Game</button>
   </div>
 </section>
 
@@ -102,14 +135,14 @@
         <div class="value" id="hdr-demand" style="font-size:16px;">—</div>
       </div>
       <div class="block" style="text-align:right;">
-        <div class="label">My company</div>
+        <div class="label">My team</div>
         <div class="value" id="hdr-me" style="font-size:16px;">—</div>
       </div>
     </div>
 
     <div id="shock-loading" class="shock-loading" style="display:none;"><span class="spin"></span> Deciding this round's market shock…</div>
     <div id="shock-banner" class="shock-banner" style="display:none;">
-      <div class="icon" id="shock-icon">⚡</div>
+      <div class="category-tag" id="shock-tag">MARKET</div>
       <div>
         <div class="title" id="shock-title">—</div>
         <div class="desc" id="shock-desc">—</div>
@@ -173,6 +206,8 @@
         </div>
       </div>
     </div>
+
+    <button class="btn btn-block" id="btn-leave-room-game" style="margin-top:16px;">Leave Game</button>
   </div>
 </section>
 
@@ -183,7 +218,7 @@
     <h1>Round <span id="res-round">1</span> is in the books</h1>
     <p>New Market Price: $<b id="res-mp" style="color:var(--ink)">—</b></p>
     <div class="shock-banner" id="res-shock-banner" style="display:none;">
-      <div class="icon" id="res-shock-icon">⚡</div>
+      <div class="category-tag" id="res-shock-tag">MARKET</div>
       <div>
         <div class="title" id="res-shock-title">—</div>
         <div class="desc" id="res-shock-desc">This round's market shock.</div>
@@ -193,11 +228,12 @@
     <p class="inline-hint">Apple bought from the highest-scoring sellers first (best mix of low price + high tech + high capacity) until it ran out of demand for the round. Anything unsold rolls over to next round.</p>
     <div class="card" style="margin-top:18px; overflow-x:auto;">
       <table>
-        <thead><tr><th>Company</th><th>Price</th><th>Sold</th><th>Revenue</th><th>Unsold</th><th>Tech</th><th>Cap</th></tr></thead>
+        <thead><tr><th>Team</th><th>Price</th><th>Sold</th><th>Revenue</th><th>Unsold</th><th>Tech</th><th>Cap</th></tr></thead>
         <tbody id="res-table-body"></tbody>
       </table>
     </div>
     <div class="center-msg" id="res-waiting-msg">Next round starts automatically — hang tight…</div>
+    <button class="btn btn-block" id="btn-leave-room-results" style="margin-top:16px;">Leave Game</button>
   </div>
 </section>
 
@@ -205,7 +241,7 @@
 <section id="screen-gameover" class="screen">
   <div class="wrap" style="max-width:720px; padding-top:56px;">
     <p class="eyebrow">final results — round 6 complete</p>
-    <h1 id="final-winner-banner">🏆 —</h1>
+    <h1 id="final-winner-banner">—</h1>
     <div id="final-leaderboard" style="margin-top:22px;"></div>
     <div class="howto-formula">Company Value = Cash + (unsold chips × $10) + (Tech level × $500) + (Capacity level × $500)</div>
 
@@ -222,8 +258,8 @@
       <canvas id="chart-mp" height="180"></canvas>
     </div>
 
-    <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">⬇️ Download match data (CSV)</button>
-    <button class="btn btn-block" id="btn-leave-room-final" style="margin-top:10px;">Leave Room</button>
+    <button class="btn btn-block" id="btn-download-csv" style="margin-top:14px;">Download match data (CSV)</button>
+    <button class="btn btn-block" id="btn-leave-room-final" style="margin-top:10px;">Leave Game</button>
     <div class="center-msg">Ask your host to start a new match when ready.</div>
   </div>
 </section>
@@ -235,7 +271,7 @@
     <button class="modal-close" id="btn-howto-close">✕</button>
     <p class="eyebrow">how to play · 30 seconds</p>
     <h2>You run a chip company.</h2>
-    <p>Over 6 rounds, you compete against other companies to win Apple's purchase orders. The company with the highest value at the end wins. Up to 4 people can run one company together — anyone on your team can act, so talk it through as you go.</p>
+    <p>Over 6 rounds, you compete against other teams to win Apple's purchase orders. The team with the highest value at the end wins. Up to 4 people can run one team together — anyone on your team can act, so talk it through as you go.</p>
 
     <div class="howto-step">
       <div class="num">1</div>
@@ -251,18 +287,31 @@
     </div>
     <div class="howto-step">
       <div class="num">4</div>
-      <div class="txt"><b>After Round 6</b><p>The company with the highest total value — cash, unsold chips, Tech, and Capacity combined — wins the match.</p></div>
+      <div class="txt"><b>After Round 6</b><p>The team with the highest total value — cash, unsold chips, Tech, and Capacity combined — wins the match.</p></div>
     </div>
 
-    <div class="howto-formula">⚡ Watch for a random <b style="color:var(--ink)">Market Shock</b> each round — it changes the rules just for that round, so no single strategy wins every match. Prices are capped at 3x the last market price, so there's room for a premium play, just no absurd numbers.</div>
+    <div class="howto-formula">Watch for a random <b style="color:var(--ink)">Market Shock</b> each round — it changes the rules just for that round, so no single strategy wins every match. Prices are capped at 3x the last market price, so there's room for a premium play, just no absurd numbers.</div>
     <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Got it, let's play</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="confirm-modal">
+  <div class="modal-box confirm-box" id="confirm-box">
+    <div class="confirm-bar"></div>
+    <h2 id="confirm-title">Are you sure?</h2>
+    <p id="confirm-message">This action cannot be undone.</p>
+    <div class="confirm-actions">
+      <button class="btn" id="confirm-cancel-btn">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn">Confirm</button>
+    </div>
   </div>
 </div>
 
 <div class="celebration-overlay" id="celebration-overlay">
   <div id="money-rain"></div>
   <div class="celebration-banner">
-    <h2 id="celebration-title">🎉 You're #1 this round!</h2>
+    <p class="eyebrow">round leader</p>
+    <h2 id="celebration-title">Your team led this round</h2>
     <p id="celebration-sub">$0 revenue</p>
   </div>
 </div>
