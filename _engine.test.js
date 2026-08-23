@@ -223,9 +223,9 @@ console.log('All calcUpgradeCost + containsProfanity checks passed.');
   const noop = e.summarizeShockImpact({ capacityProductionMultiplier: 1, techUpgradeCostMultiplier: 1, capacityUpgradeCostMultiplier: 1, demandMultiplier: 1, weightBias: { price: 1, tech: 1, capacity: 1 } });
   assert.strictEqual(noop, 'No numeric change this round.', 'an all-1.0 effects object reads as no change');
   const summary = e.summarizeShockImpact({ capacityProductionMultiplier: 0.6, techUpgradeCostMultiplier: 1, capacityUpgradeCostMultiplier: 1, demandMultiplier: 1, weightBias: { price: 1, tech: 1.8, capacity: 1 } });
-  assert.ok(summary.includes('Capacity payoff -40%'), 'correctly reports a 40% capacity payoff cut');
-  assert.ok(summary.includes('Tech weight +80%'), 'correctly reports an 80% tech weight increase');
-  assert.ok(!summary.includes('Price weight'), 'fields that did not change are omitted, not padded with +0%');
+  assert.ok(summary.includes('Capacity output -40%'), 'correctly reports a 40% capacity output cut');
+  assert.ok(summary.includes('Tech matters +80%'), 'correctly reports an 80% tech-matters increase');
+  assert.ok(!summary.includes('Price matters'), 'fields that did not change are omitted, not padded with +0%');
 }
 
 console.log('All calcMaxPrice + summarizeShockImpact checks passed.');

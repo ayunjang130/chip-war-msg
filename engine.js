@@ -241,9 +241,13 @@ function pct(multiplier) {
 // 13 dramatic templates + Calm Market (weighted heavier so chaos isn't
 // constant). Magnitudes re-roll every time a template is picked, so even a
 // template repeating later in a long match reads a little differently.
-// Copy is written to be fun/vivid for a teenage audience while staying
-// mechanically clear - see summarizeShockImpact() for the plain-numbers
-// line shown right alongside every one of these.
+// Copy follows one fixed narrative shape on purpose - "<something plain
+// happened>, so <plain-word consequence using only Price/Tech/Capacity/
+// chips/Apple>" - the same "war broke out, so X is more needed and Y is
+// less useful" shape a reader with zero economics background can parse in
+// one pass. No finance/econ jargon (no "efficiency", "elasticity", "margin"
+// etc.) and no idiom left unexplained - see summarizeShockImpact() for the
+// plain-numbers line shown right alongside every one of these.
 function getShockTemplates() {
   return [
     {
@@ -251,7 +255,7 @@ function getShockTemplates() {
       title: 'Supply Chain Crisis',
       build() {
         const m = roll(0.45, 0.75);
-        return { effects: { capacityProductionMultiplier: m }, description: `A key supplier just went dark. Everyone's Capacity efficiency takes a ${pct(m)}% hit this round.` };
+        return { effects: { capacityProductionMultiplier: m }, description: `A key supplier just went dark, so every team makes ${pct(m)}% fewer chips this round.` };
       }
     },
     {
@@ -259,7 +263,7 @@ function getShockTemplates() {
       title: 'Logistics Breakthrough',
       build() {
         const m = roll(1.15, 1.45);
-        return { effects: { capacityProductionMultiplier: m }, description: `A new shipping shortcut just opened up — Capacity efficiency jumps ${pct(m)}% this round!` };
+        return { effects: { capacityProductionMultiplier: m }, description: `A new shipping shortcut just opened up, so every team makes ${pct(m)}% more chips this round.` };
       }
     },
     {
@@ -267,7 +271,7 @@ function getShockTemplates() {
       title: "Apple's Quality Push",
       build() {
         const m = roll(1.5, 2.3);
-        return { effects: { weightBias: { tech: m } }, description: `Apple's engineers are obsessing over specs this round — Tech scores hit different.` };
+        return { effects: { weightBias: { tech: m } }, description: `Apple's engineers are obsessing over specs, so Tech matters even more when Apple picks who to buy from this round.` };
       }
     },
     {
@@ -275,7 +279,7 @@ function getShockTemplates() {
       title: "Apple's Value Push",
       build() {
         const m = roll(1.4, 2.0);
-        return { effects: { weightBias: { price: m } }, description: `Apple's CFO is on a cost-cutting rampage this round — Price just became king.` };
+        return { effects: { weightBias: { price: m } }, description: `Apple's CFO is on a cost-cutting rampage, so the cheapest price wins even harder this round.` };
       }
     },
     {
@@ -283,7 +287,7 @@ function getShockTemplates() {
       title: 'Reliability Focus',
       build() {
         const m = roll(1.5, 2.2);
-        return { effects: { weightBias: { capacity: m } }, description: `Apple wants proof you can actually deliver at scale — Capacity is the flex this round.` };
+        return { effects: { weightBias: { capacity: m } }, description: `Apple wants proof you can deliver at scale, so Capacity matters even more when Apple picks who to buy from this round.` };
       }
     },
     {
@@ -291,7 +295,7 @@ function getShockTemplates() {
       title: 'Chip Glut',
       build() {
         const m = roll(0.55, 0.75);
-        return { effects: { demandMultiplier: m }, description: `Apple's warehouses are already stuffed — total demand shrinks ${pct(m)}% this round.` };
+        return { effects: { demandMultiplier: m }, description: `Apple's warehouses are already stuffed, so Apple buys ${pct(m)}% fewer chips this round.` };
       }
     },
     {
@@ -299,7 +303,7 @@ function getShockTemplates() {
       title: 'Emergency Restock',
       build() {
         const m = roll(1.3, 1.75);
-        return { effects: { demandMultiplier: m }, description: `A surprise hit product just sold out — Apple is scrambling for ${pct(m)}% more chips!` };
+        return { effects: { demandMultiplier: m }, description: `A surprise hit product just sold out, so Apple is scrambling to buy ${pct(m)}% more chips this round.` };
       }
     },
     {
@@ -307,7 +311,7 @@ function getShockTemplates() {
       title: 'Talent War',
       build() {
         const m = roll(1.4, 1.9);
-        return { effects: { techUpgradeCostMultiplier: m }, description: `Rivals are poaching engineers left and right — Tech upgrades cost ${pct(m)}% more this round.` };
+        return { effects: { techUpgradeCostMultiplier: m }, description: `Rivals are poaching engineers left and right, so Tech upgrades cost ${pct(m)}% more this round.` };
       }
     },
     {
@@ -315,7 +319,7 @@ function getShockTemplates() {
       title: 'R&D Grant',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { techUpgradeCostMultiplier: m }, description: `A fat government grant just landed — Tech upgrades are ${pct(m)}% cheaper this round.` };
+        return { effects: { techUpgradeCostMultiplier: m }, description: `A fat government grant just landed, so Tech upgrades cost ${pct(m)}% less this round.` };
       }
     },
     {
@@ -323,7 +327,7 @@ function getShockTemplates() {
       title: 'Factory Subsidy',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { capacityUpgradeCostMultiplier: m }, description: `Free money from the local government — Capacity upgrades are ${pct(m)}% cheaper this round.` };
+        return { effects: { capacityUpgradeCostMultiplier: m }, description: `The local government is handing out free money, so Capacity upgrades cost ${pct(m)}% less this round.` };
       }
     },
     {
@@ -331,7 +335,7 @@ function getShockTemplates() {
       title: 'Import Tariff',
       build() {
         const m = roll(1.4, 1.9);
-        return { effects: { capacityUpgradeCostMultiplier: m }, description: `New tariffs just hit fab equipment — Capacity upgrades cost ${pct(m)}% more this round.` };
+        return { effects: { capacityUpgradeCostMultiplier: m }, description: `New tariffs just hit factory equipment, so Capacity upgrades cost ${pct(m)}% more this round.` };
       }
     },
     {
@@ -339,7 +343,7 @@ function getShockTemplates() {
       title: "Rival's Quality Scandal",
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { weightBias: { tech: m } }, description: `A competitor just got caught cutting corners — buyers are distracted, Tech matters a bit less.` };
+        return { effects: { weightBias: { tech: m } }, description: `A competitor just got caught cutting corners, so buyers are distracted and Tech matters a bit less this round.` };
       }
     },
     {
@@ -347,7 +351,7 @@ function getShockTemplates() {
       title: 'Budget Slack',
       build() {
         const m = roll(0.5, 0.7);
-        return { effects: { weightBias: { price: m } }, description: `Apple found some spare change in the couch cushions — Price matters a little less this round.` };
+        return { effects: { weightBias: { price: m } }, description: `Apple found some spare change in the couch cushions, so price matters a little less this round.` };
       }
     },
     { id: 'calm_market', title: NEUTRAL_SHOCK.title, weight: 4, build: () => ({ effects: {}, description: 'Nothing dramatic in the news today — standard rules apply.' }) }
@@ -388,15 +392,18 @@ function summarizeShockImpact(effects) {
     const d = delta(m);
     return d === 0 ? null : `${label} ${d > 0 ? '+' : ''}${d}%`;
   };
+  // Labels are plain, everyday words on purpose (no "weight"/"elasticity"/
+  // "multiplier") - "Tech matters +80%" reads as "Tech counts for more in
+  // Apple's decision", no scoring-formula background required.
   const b = effects.weightBias || {};
   const parts = [
-    fmt('Capacity payoff', effects.capacityProductionMultiplier),
+    fmt('Capacity output', effects.capacityProductionMultiplier),
     fmt('Tech upgrade cost', effects.techUpgradeCostMultiplier),
     fmt('Capacity upgrade cost', effects.capacityUpgradeCostMultiplier),
-    fmt('Apple demand', effects.demandMultiplier),
-    fmt('Price weight', b.price),
-    fmt('Tech weight', b.tech),
-    fmt('Capacity weight', b.capacity)
+    fmt("Apple's orders", effects.demandMultiplier),
+    fmt('Price matters', b.price),
+    fmt('Tech matters', b.tech),
+    fmt('Capacity matters', b.capacity)
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'No numeric change this round.';
 }

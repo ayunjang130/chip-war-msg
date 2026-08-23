@@ -64,6 +64,22 @@ function teamIsConnected(team) {
   return team.members.some((m) => m.connected);
 }
 
+// ---- Team "leader" (GDD extension: team-private + all-teams channels) ----
+// No stored/assignable field on purpose - the leader is always just
+// "whichever of this team's members is currently connected, earliest in
+// the roster" (falling back to the first member at all if nobody's
+// connected). That means leadership auto-hands-off the moment the current
+// leader disconnects, instead of a classroom negotiation going silent
+// because the one person who could speak for the team stepped away.
+function getTeamLeader(team) {
+  if (!team || !team.members || team.members.length === 0) return null;
+  return team.members.find((m) => m.connected) || team.members[0];
+}
+function isTeamLeader(team, memberId) {
+  const leader = getTeamLeader(team);
+  return !!leader && !!memberId && leader.memberId === memberId;
+}
+
 function createTeamState(teamId, teamName, startingCapital, isBot = false, botStrategy = null) {
   return {
     teamId,
@@ -71,6 +87,7 @@ function createTeamState(teamId, teamName, startingCapital, isBot = false, botSt
     members: [], // {memberId, socketId, memberName, connected} - up to MAX_MEMBERS_PER_TEAM
     isBot,
     botStrategy,
+    chatLog: [], // this team's PRIVATE channel - never broadcast outside its own members
     capital: startingCapital,
     inventory: engine.CONFIG.INITIAL_INVENTORY,
     techLevel: engine.CONFIG.INITIAL_TECH,
@@ -104,7 +121,7 @@ function createRoom(hostSocketId) {
     timerHandle: null,
     nextRoundHandle: null,
     marketPrice: 0,
-    chatLog: [],
+    globalChatLog: [], // the All-Teams channel: every leader (+ HOST) can post, everyone can read
     history: [],
     lockCounter: 0,
     lastActivityAt: Date.now(),
@@ -130,6 +147,10 @@ function createRoom(hostSocketId) {
 // Capital ("cash reserves") is only shown to the owning team and to the host.
 function publicTeam(team, viewerTeamId, isPrivileged, room) {
   const showCapital = isPrivileged || team.teamId === viewerTeamId;
+  // isLeader is a boolean, never the raw memberId - memberId doubles as the
+  // reconnection secret (see JOIN_ROOM), so it must never leave the server
+  // for anyone but its own owning socket.
+  const leader = getTeamLeader(team);
   return {
     teamId: team.teamId,
     teamName: team.teamName,
@@ -137,7 +158,7 @@ function publicTeam(team, viewerTeamId, isPrivileged, room) {
     isBot: team.isBot,
     memberCount: team.members.length,
     maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM,
-    members: team.members.map((m) => ({ memberName: m.memberName, connected: m.connected })),
+    members: team.members.map((m) => ({ memberName: m.memberName, connected: m.connected, isLeader: !!leader && m === leader })),
     price: team.price,
     quantity: team.quantity,
     techLevel: team.techLevel,
@@ -181,8 +202,10 @@ function broadcastState(room) {
     };
     // Same payload object, fanned out to every device this team currently
     // has connected - any of them can act on it, per the "up to 4 people,
-    // one shared company" design.
-    connectedMembers.forEach((m) => io.to(m.socketId).emit('STATE_SYNC', payload));
+    // one shared company" design. amILeader is the one field that's NOT
+    // shared verbatim: it's computed fresh per socket, since exactly one
+    // connected member of the team is ever the leader.
+    connectedMembers.forEach((m) => io.to(m.socketId).emit('STATE_SYNC', { ...payload, amILeader: isTeamLeader(team, m.memberId) }));
   });
 
   if (room.hostSocketId) {
@@ -208,15 +231,18 @@ function broadcastLobby(room) {
     roomCode: room.code,
     config: room.config,
     phase: room.phase,
-    teams: Object.values(room.teams).map((t) => ({
-      teamId: t.teamId,
-      teamName: t.teamName,
-      connected: teamIsConnected(t),
-      isBot: t.isBot,
-      memberCount: t.members.length,
-      maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM,
-      members: t.members.map((m) => ({ memberName: m.memberName, connected: m.connected }))
-    }))
+    teams: Object.values(room.teams).map((t) => {
+      const leader = getTeamLeader(t);
+      return {
+        teamId: t.teamId,
+        teamName: t.teamName,
+        connected: teamIsConnected(t),
+        isBot: t.isBot,
+        memberCount: t.members.length,
+        maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM,
+        members: t.members.map((m) => ({ memberName: m.memberName, connected: m.connected, isLeader: !!leader && m === leader }))
+      };
+    })
   };
   io.to(room.code).emit('LOBBY_UPDATE', payload);
 }
@@ -287,7 +313,7 @@ function roomUpgradeCost(room, kind, currentLevel) {
 const SHOCK_SCHEMA_HINT = `Respond with ONLY one JSON object - no markdown fences, no commentary before or after - shaped exactly like this:
 {
   "title": "short punchy name, max 6 words, no emoji",
-  "description": "one sentence, under 160 characters, written like a clean business-news headline for 15-18 year olds - clear and a little dramatic, but no emoji and no cutesy language",
+  "description": "ONE plain sentence, under 140 characters, shaped exactly like 'A war broke out, so tanks are more needed and umbrellas are less useful' - a real-world-sounding cause, a comma, then 'so <plain consequence>'. Write it for a reader who has never taken an economics class and will read it exactly once. The ONLY game words allowed are Price, Tech, Capacity, Apple, and chips - do not use words like multiplier, elasticity, margin, valuation, efficiency, capex, weight, or any other finance/economics jargon. No emoji, no cutesy language.",
   "effects": {
     "capacityProductionMultiplier": number 0.5-1.5 (1 = no change; below 1 hurts teams who invested in Capacity, above 1 helps them),
     "techUpgradeCostMultiplier": number 0.5-2.0 (1 = no change),
@@ -453,6 +479,7 @@ function botAct(room, team) {
         team.capital -= cost;
         budget -= cost;
         bought = true;
+        postActivity(room, team, kind === 'tech' ? 'tech_up' : 'capacity_up', `upgraded ${kind === 'tech' ? 'Tech' : 'Capacity'} to Lv${kind === 'tech' ? team.techLevel : team.capacityLevel}`);
         break;
       }
     }
@@ -469,6 +496,7 @@ function botAct(room, team) {
 
   team.locked = true;
   team.lockOrder = ++room.lockCounter;
+  postActivity(room, team, 'lock', `locked in — $${team.price} × ${team.quantity} units`);
   broadcastState(room);
   maybeEarlyResolve(room);
 }
@@ -601,6 +629,7 @@ function resetRoom(room) {
   room.shockHistory = [];
   room.lastResultsPayload = null;
   room.finalPayload = null;
+  room.globalChatLog = [];
   Object.values(room.teams).forEach((t) => {
     t.capital = room.config.startingCapital;
     t.inventory = engine.CONFIG.INITIAL_INVENTORY;
@@ -610,6 +639,7 @@ function resetRoom(room) {
     t.quantity = 0;
     t.locked = false;
     t.lastRoundPrice = 50;
+    t.chatLog = [];
   });
   broadcastLobby(room);
   broadcastState(room);
@@ -618,6 +648,31 @@ function resetRoom(room) {
 // ---- Socket.io event wiring (event names match GDD section "5. Host
 // Dashboard Specifications" table, plus the extra HOST_*/TEAM_INVEST/
 // CHAT_MESSAGE events needed to make the loop actually playable) ----------
+
+// ---- Negotiation channels ---------------------------------------------
+// Two independent channels per room:
+//  - team.chatLog:        private to one team, any of its members can post
+//  - room.globalChatLog:  visible to every team + host; only each team's
+//                          current leader (see getTeamLeader) can post as
+//                          that team - so "who's actually negotiating
+//                          across companies" stays a deliberate, visible
+//                          choice instead of a free-for-all.
+// Activity/"kill feed" entries (kind: 'system') are auto-posted into the
+// SAME global channel by postActivity() below, so every team can see what
+// every other team just did without anyone having to type it out.
+function postGlobalMessage(room, { name, text, kind, actionType, teamId }) {
+  const msg = { id: genId('msg'), channel: 'global', kind: kind || 'chat', name, text, actionType: actionType || null, teamId: teamId || null, at: Date.now() };
+  room.globalChatLog.push(msg);
+  if (room.globalChatLog.length > 200) room.globalChatLog.shift();
+  io.to(room.code).emit('CHAT_MESSAGE', msg);
+  return msg;
+}
+function postActivity(room, team, actionType, text) {
+  postGlobalMessage(room, { name: team.teamName, text, kind: 'system', actionType, teamId: team.teamId });
+}
+function sendChatSync(socketId, room, team) {
+  io.to(socketId).emit('CHAT_SYNC', { team: team ? team.chatLog || [] : [], global: room.globalChatLog || [] });
+}
 
 io.on('connection', (socket) => {
   socket.on('HOST_CREATE_ROOM', (_payload, cb) => {
@@ -637,6 +692,7 @@ io.on('connection', (socket) => {
     cb && cb({ ok: true, roomCode: room.code, config: room.config, aiEnabled: !!process.env.ANTHROPIC_API_KEY });
     broadcastLobby(room);
     broadcastState(room);
+    sendChatSync(socket.id, room, null);
     if (room.phase === 'round_results' && room.lastResultsPayload) {
       io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
     } else if (room.phase === 'game_over' && room.finalPayload) {
@@ -670,6 +726,7 @@ io.on('connection', (socket) => {
       cb && cb({ ok: true, teamId: team.teamId, memberId: mId, roomCode });
       broadcastLobby(room);
       broadcastState(room);
+      sendChatSync(socket.id, room, team);
       // Catch up a (re)joining client on whatever already happened - without
       // this, reconnecting mid/after a round showed an empty results/game-
       // over screen, since those only ever populate from their one-shot
@@ -789,12 +846,14 @@ io.on('connection', (socket) => {
       team.capital -= cost;
       team.techPurchasesThisRound = team.techPurchasesThisRound || [];
       team.techPurchasesThisRound.push(cost);
+      postActivity(room, team, 'tech_up', `upgraded Tech to Lv${team.techLevel}`);
     } else if (kind === 'capacity' && team.capacityLevel < engine.CONFIG.CAPACITY_MAX) {
       const cost = roomUpgradeCost(room, 'capacity', team.capacityLevel);
       team.capacityLevel += 1;
       team.capital -= cost;
       team.capacityPurchasesThisRound = team.capacityPurchasesThisRound || [];
       team.capacityPurchasesThisRound.push(cost);
+      postActivity(room, team, 'capacity_up', `upgraded Capacity to Lv${team.capacityLevel}`);
     }
     broadcastState(room);
   });
@@ -816,6 +875,7 @@ io.on('connection', (socket) => {
     team.capital += refund;
     if (kind === 'tech') team.techLevel -= 1;
     else team.capacityLevel -= 1;
+    postActivity(room, team, kind === 'tech' ? 'tech_down' : 'capacity_down', `undid a ${kind === 'tech' ? 'Tech' : 'Capacity'} upgrade (back to Lv${kind === 'tech' ? team.techLevel : team.capacityLevel})`);
     broadcastState(room);
   });
 
@@ -826,11 +886,12 @@ io.on('connection', (socket) => {
     if (!team || team.locked || room.phase !== 'round_active') return;
     team.locked = true;
     team.lockOrder = ++room.lockCounter;
+    postActivity(room, team, 'lock', `locked in — $${team.price} × ${team.quantity} units`);
     broadcastState(room);
     maybeEarlyResolve(room);
   });
 
-  socket.on('CHAT_MESSAGE', ({ roomCode, teamId, text }) => {
+  socket.on('CHAT_MESSAGE', ({ roomCode, teamId, channel, text }) => {
     const room = rooms[roomCode];
     if (!room || !text || !String(text).trim()) return;
     const trimmed = String(text).slice(0, 240);
@@ -839,17 +900,36 @@ io.on('connection', (socket) => {
       return;
     }
     const sender = teamId ? room.teams[teamId] : null;
+
+    // ---- Team channel: private to this team, any connected member can post ----
+    if (channel === 'team') {
+      if (!sender) return; // only real teams have a private channel (not HOST)
+      const member = findMemberBySocket(sender, socket.id);
+      if (!member) return; // must actually be on this team to post here
+      const name = sender.teamName + (sender.members.length > 1 ? ` (${member.memberName})` : '');
+      const msg = { id: genId('msg'), channel: 'team', kind: 'chat', name, text: trimmed, at: Date.now() };
+      sender.chatLog = sender.chatLog || [];
+      sender.chatLog.push(msg);
+      if (sender.chatLog.length > 150) sender.chatLog.shift();
+      sender.members.forEach((m) => {
+        if (m.socketId && m.connected) io.to(m.socketId).emit('CHAT_MESSAGE', msg);
+      });
+      return;
+    }
+
+    // ---- All-Teams (global) channel: HOST always allowed; a player must
+    // be their team's CURRENT leader to post - everyone on every team can
+    // still read it, per the "leader negotiates, team watches" design. ----
     let name = 'HOST';
     if (sender) {
       const member = findMemberBySocket(sender, socket.id);
-      // Only disambiguate by member name once a team actually HAS more than
-      // one person - keeps the common single-member case exactly as before.
-      name = sender.teamName + (member && sender.members.length > 1 ? ` (${member.memberName})` : '');
+      if (!member || !isTeamLeader(sender, member.memberId)) {
+        io.to(socket.id).emit('CHAT_BLOCKED', { reason: 'Only your team leader can post in the All Teams channel.' });
+        return;
+      }
+      name = sender.teamName + (sender.members.length > 1 ? ` (${member.memberName})` : '');
     }
-    const msg = { id: genId('msg'), name, text: trimmed, at: Date.now() };
-    room.chatLog.push(msg);
-    if (room.chatLog.length > 200) room.chatLog.shift();
-    io.to(roomCode).emit('CHAT_MESSAGE', msg);
+    postGlobalMessage(room, { name, text: trimmed, kind: 'chat' });
   });
 
   socket.on('HOST_UPDATE_CONFIG', ({ roomCode, config }) => {

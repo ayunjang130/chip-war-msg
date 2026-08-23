@@ -55,7 +55,8 @@ for 30+ minutes, so long-running public deployments don't leak memory.
 - [x] Debt allowed (negative capital from investment or poor sales)
 - [x] Room codes, lobby, host dashboard (config, pause/resume/force-skip,
       kick, reset, destroy), reconnection by teamId (incl. mid-results/game-over)
-- [x] Live "visible bluffing" ticker + moderated negotiation chat channel
+- [x] Live "visible bluffing" ticker + moderated negotiation channel, split
+      into a private per-team channel and a leader-only All-Teams channel
 - [x] Hidden info: capital is only visible to its own team + the host
 - [x] Beginner onboarding: "How to Play" modal + inline plain-language hints
 - [x] Optional AI bots (Tech/Capacity/Balanced) for solo/small-group testing
@@ -102,10 +103,31 @@ for 30+ minutes, so long-running public deployments don't leak memory.
 - [x] Join flow is a 4-step wizard (room code → choose create-or-join →
       the one relevant form) instead of one screen showing everything at
       once, each step with a Back button
-- [x] No emoji anywhere in the UI - lock status is a small CSS dot, market
-      shocks show a computed category tag (CAPACITY/COST/DEMAND/PRIORITY/
-      MARKET) instead of a random icon, the round-winner celebration uses
-      falling gold/green geometric particles instead of money emoji
+- [x] No emoji anywhere in the UI - a small hand-authored SVG icon set
+      (`public/js/icons.js`) replaces every place an emoji or bare colored
+      dot used to stand in: lock status, Tech/Capacity labels, the round
+      header stats, BOT badges, the confirm-modal warning, and each Market
+      Shock's category tag
+- [x] Negotiation is two channels, not one: a private per-team channel
+      (any teammate can post) and an All-Teams channel every team can read
+      but only each team's current leader can post in - leadership is
+      automatic (whoever's connected earliest on the roster) and hands off
+      the instant that person disconnects, no manual assignment needed
+- [x] Every locked-in offer, Tech/Capacity purchase, and undo auto-posts a
+      one-line "who did what" entry into the All-Teams channel - a
+      PUBG-style kill feed for the whole match, bots included
+- [x] Ticker cards now flash on a Tech/Capacity level change too (not just
+      Price/Qty), plus a gold pulse ring the instant a team locks in - the
+      same "just happened" ping now covers nearly every action, not only
+      typing
+- [x] Undo (Tech/Capacity) redesigned from a barely-visible ghost link into
+      a bordered, icon-labeled button grouped tightly with Buy
+- [x] Market Shock copy rewritten end-to-end (procedural templates + the
+      AI prompt) into one plain cause-and-effect sentence - "a key supplier
+      just went dark, so every team makes 40% fewer chips this round" -
+      with an explicit banned-jargon list (no "multiplier", "elasticity",
+      "weight", etc.) so a reader with zero economics background gets it
+      in one pass
 
 ## Team names replace "team name + cosmetic company name"
 
@@ -269,6 +291,93 @@ never reaches the chat log or other players — the sender gets a private
 "Message blocked" notice instead. It's intentionally simple: easy to
 bypass with creative spelling, good enough for the common case. Swap in a
 real moderation API later if stronger coverage matters.
+
+## Icon system (`public/js/icons.js`)
+
+A single dependency-free file: a plain `Icons` global holding ~18 small
+hand-authored `<svg>` strings (lock, unlock, undo, cpu, layers, users,
+grid, crown, star, alert-triangle, bot, send, plus, dollar, package,
+target, trending, clock), each using `stroke="currentColor"` so it always
+inherits whatever text color it's dropped into — a badge, a button, a
+ticker row — with zero extra wiring. Loaded once via a `<script>` tag on
+both `index.html` and `host.html` before their respective `player.js` /
+`host.js`, since this project has no bundler. Static markup gets an icon
+via `<span class="icon-slot" data-icon="cpu"></span>` plus a one-time
+`injectIcons()` call at startup; anything built dynamically in JS (ticker
+cards, chat rows, the leaderboard) just concatenates `Icons.xxx` directly
+into its template string. Kept entirely separate from `engine.js`'s data
+model — a shock's `categoryTag` still drives its icon by lookup on the
+client, so the "no emoji, ever" guarantee `_engine.test.js` checks for
+stays true at the data layer, not just visually.
+
+## Two negotiation channels + team leader
+
+`CHAT_MESSAGE` now takes a `channel: 'team' | 'global'` field instead of
+always broadcasting room-wide:
+
+- **Team channel** — `team.chatLog`, private to that team. Any connected
+  member can post; only that team's own sockets ever receive it.
+- **All-Teams channel** — `room.globalChatLog`, visible to every team +
+  host. Only that team's current **leader** can post as them (HOST can
+  always post). Reading is unrestricted — every teammate sees it, not
+  just the leader.
+
+There's no stored/assignable "leader" field. `getTeamLeader(team)` just
+returns whichever member is connected earliest in the roster (falling
+back to the first member at all if nobody's connected), computed fresh
+every time it's needed. That means leadership silently hands off the
+moment the current leader disconnects, instead of a classroom's cross-team
+negotiation going silent because the one person who could speak for a
+team stepped away.
+
+**Deliberate security note:** a member's `isLeader` status is exposed to
+everyone as a boolean (safe — it's not a secret). The raw `memberId` is
+**not** — `JOIN_ROOM` reconnection trusts `{roomCode, teamId, memberId}`
+alone with no separate token, so if `memberId` ever leaked to other
+clients it would let anyone hijack another player's seat. `amILeader`
+(used to gate the composer's own input) is computed server-side per
+socket inside `broadcastState`'s existing per-member fan-out and injected
+into each connected member's own `STATE_SYNC` payload — never derived
+client-side from an ID.
+
+New joins/reconnects get caught up via a `CHAT_SYNC` emit (`{team,
+global}` history arrays) right after `JOIN_ROOM`/`HOST_REJOIN` succeeds,
+so switching to a channel you haven't looked at yet mid-match doesn't
+show a blank log. `HOST_RESET_GAME` clears both logs along with the rest
+of the match state.
+
+## Activity feed (kill feed)
+
+Every voluntary Lock In, Tech/Capacity purchase, and undo now also posts
+a short system-generated line into the All-Teams channel via
+`postActivity()` — "Team Alpha upgraded Tech to Lv2", "Team Beta locked
+in — $42 × 80 units" — styled visually distinct from human chat (dim,
+monospace, a small icon matching the action). Bots go through the exact
+same call, so a match run with AI opponents still has a live feed instead
+of a suspiciously quiet channel. Deliberately **not** logged: the
+continuous per-keystroke price/quantity typing already has its own
+real-time signal (the ticker's flash-on-change), so mirroring every
+keystroke into the feed as well would just be noise; only the discrete,
+"something just became final" actions post. Auto-submitted stragglers at
+round timeout are skipped too — by the time that fires, results are about
+to render anyway, so a feed entry has nothing left to react to.
+
+## Plain-language Market Shocks
+
+Every shock's `description` — procedural templates and the AI prompt
+alike — now follows one fixed shape: a real-world-sounding cause, then
+"so `<plain consequence>`", using only Price/Tech/Capacity/Apple/chips as
+game vocabulary. "A key supplier just went dark, so every team makes 40%
+fewer chips this round" reads the same to someone who's never taken an
+economics class as to someone who has. The AI prompt (`SHOCK_SCHEMA_HINT`
+in `server.js`) spells out that same shape plus an explicit banned-word
+list (multiplier, elasticity, margin, valuation, efficiency, capex,
+weight) so AI-generated shocks can't drift back into finance-report tone.
+The numeric summary line (`engine.summarizeShockImpact()`) got the same
+treatment — "Price weight +65%" is now "Price matters +65%" — while the
+host-only raw multiplier view (`host.js`'s `summarizeEffects()`) keeps
+its precise `×1.65`-style notation on purpose, since that one's written
+for the teacher running the match, not a 15-year-old reading it once.
 
 ## What to expand next
 
