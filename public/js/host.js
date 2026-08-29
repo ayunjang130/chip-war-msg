@@ -9,8 +9,16 @@
   let charts = {};
   let currentTeamCount = 0; // kept in sync from LOBBY_UPDATE/STATE_SYNC, used for the Total Apple Demand preview
   let confirmCallback = null;
+  let lastLockByTeam = {}; // teamId -> bool, so the live table can ping a row the instant it flips to locked
 
   const $ = (id) => document.getElementById(id);
+  function injectIcons(root) {
+    (root || document).querySelectorAll('[data-icon]').forEach((el) => {
+      if (window.Icons && Icons[el.dataset.icon] != null) el.innerHTML = Icons[el.dataset.icon];
+    });
+  }
+  const CATEGORY_ICON = { CAPACITY: 'layers', COST: 'dollar', DEMAND: 'package', PRIORITY: 'target', MARKET: 'trending' };
+  const ACTION_ICON = { lock: 'lock', tech_up: 'cpu', tech_down: 'cpu', capacity_up: 'layers', capacity_down: 'layers' };
   function money(n) {
     n = Math.round(n || 0);
     return n < 0 ? '-$' + Math.abs(n).toLocaleString() : '$' + n.toLocaleString();
@@ -96,7 +104,8 @@
       return;
     }
     el.style.display = 'flex';
-    $('shock-tag').textContent = shock.categoryTag || 'MARKET';
+    const tag = shock.categoryTag || 'MARKET';
+    $('shock-tag').innerHTML = Icons[CATEGORY_ICON[tag] || 'trending'] + tag;
     $('shock-title').textContent = shock.title;
     $('shock-desc').textContent = shock.description;
     $('shock-effects').textContent = (shock.impact || '') + '  |  raw: ' + summarizeEffects(shock.effects);
@@ -244,7 +253,7 @@
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
         '<span style="flex:1"><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b></span>' +
         (t.isBot ? '' : '<span class="pill">' + t.memberCount + '/' + t.maxMembers + '</span>') +
-        (t.isBot ? '<span class="badge badge-bot">BOT</span>' : '') +
+        (t.isBot ? '<span class="badge badge-bot">' + Icons.bot + ' BOT</span>' : '') +
         (!t.connected && !t.isBot ? '<span class="badge badge-offline">OFFLINE</span>' : '') +
         '<button class="btn btn-sm btn-red" data-kick="' + t.teamId + '" style="margin-left:8px;">Kick</button>';
       list.appendChild(row);
@@ -270,9 +279,12 @@
     payload.teams.forEach((t) => {
       const tr = document.createElement('tr');
       const label = '<b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>';
+      const justLocked = lastLockByTeam[t.teamId] === false && t.locked === true;
+      lastLockByTeam[t.teamId] = t.locked;
+      if (justLocked) tr.classList.add('lock-flash');
       tr.innerHTML =
-        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' <span class="badge badge-bot">BOT</span>' : ' <span class="hint-text">' + t.memberCount + '/' + t.maxMembers + '</span>') + '</td>' +
-        '<td><span class="status-dot ' + (t.locked ? 'locked' : 'open') + '"></span></td>' +
+        '<td style="color:' + colorFor(t.teamId) + '">' + label + (t.isBot ? ' <span class="badge badge-bot">' + Icons.bot + ' BOT</span>' : ' <span class="hint-text">' + t.memberCount + '/' + t.maxMembers + '</span>') + '</td>' +
+        '<td><span class="lock-indicator ' + (t.locked ? 'locked' : 'open') + '" title="' + (t.locked ? 'Locked' : 'Not locked yet') + '">' + (t.locked ? Icons.lock : Icons.unlock) + '</span></td>' +
         '<td>$' + t.price + '</td>' +
         '<td>' + t.quantity + '</td>' +
         '<td>Lv' + t.techLevel + '</td>' +
@@ -300,6 +312,7 @@
   }
 
   function renderRoundResults(payload) {
+    Sound.results();
     const body = $('live-results-body');
     body.innerHTML = '';
     payload.results.forEach((r) => {
@@ -316,6 +329,7 @@
   }
 
   function renderGameOver(payload) {
+    Sound.victory();
     $('final-winner-banner').textContent = payload.winner ? payload.winner.teamName + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
@@ -323,7 +337,7 @@
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
       row.innerHTML =
-        '<div class="rank">' + (idx + 1) + '</div>' +
+        '<div class="rank">' + (idx === 0 ? Icons.star + ' ' : '') + (idx + 1) + '</div>' +
         '<div class="name"><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' · tech Lv' + t.techLevel + ' · capacity Lv' + t.capacityLevel + '</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
@@ -400,8 +414,8 @@
   }
   $('btn-download-csv').addEventListener('click', downloadMatchCSV);
 
-  // ---------- chat ----------
-  function appendChat(msg) {
+  // ---------- chat (All-Teams channel only - team-private channels never reach the host) ----------
+  function appendChatBubble(msg) {
     const log = $('chat-log');
     const row = document.createElement('div');
     row.className = 'chat-msg';
@@ -409,11 +423,24 @@
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
+  function appendKillfeed(msg) {
+    const log = $('chat-log');
+    const row = document.createElement('div');
+    row.className = 'chat-msg system act-' + (msg.actionType || '');
+    const icon = Icons[ACTION_ICON[msg.actionType]] || Icons.trending;
+    row.innerHTML = '<span class="act-icon">' + icon + '</span><b>' + escapeHtml(msg.name) + '</b> ' + escapeHtml(msg.text);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+  function routeChatMessage(msg) {
+    if (msg.kind === 'system') appendKillfeed(msg);
+    else appendChatBubble(msg);
+  }
   $('btn-chat-send').addEventListener('click', () => {
     const input = $('chat-input');
     const text = input.value.trim();
     if (!text) return;
-    socket.emit('CHAT_MESSAGE', { roomCode: myRoomCode, text });
+    socket.emit('CHAT_MESSAGE', { roomCode: myRoomCode, channel: 'global', text });
     input.value = '';
   });
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-chat-send').click(); });
@@ -447,7 +474,13 @@
     routeScreen('round_active');
     showShockLoading();
   });
-  socket.on('ROUND_START', () => routeScreen('round_active'));
+  socket.on('ROUND_START', (payload) => {
+    routeScreen('round_active');
+    if (payload && payload.shock) {
+      Sound.shock();
+      Juice.shake($('shock-banner'));
+    }
+  });
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));
   socket.on('ROUND_RESULT', (payload) => {
     renderRoundResults(payload);
@@ -457,7 +490,31 @@
     renderGameOver(payload);
     routeScreen('game_over');
   });
-  socket.on('CHAT_MESSAGE', appendChat);
+  socket.on('CHAT_MESSAGE', routeChatMessage);
+  socket.on('CHAT_SYNC', (payload) => {
+    $('chat-log').innerHTML = '';
+    (payload.global || []).forEach(routeChatMessage);
+  });
+
+  injectIcons();
+
+  $('btn-open-broadcast').addEventListener('click', () => {
+    if (!myRoomCode) return;
+    window.open('/broadcast?room=' + encodeURIComponent(myRoomCode), '_blank');
+  });
+
+  function updateSoundToggleIcon() {
+    const btn = $('btn-sound-toggle');
+    const on = Sound.isEnabled();
+    btn.classList.toggle('muted', !on);
+    btn.querySelector('.icon-slot').innerHTML = on ? Icons.volume : Icons.volumeOff;
+  }
+  $('btn-sound-toggle').addEventListener('click', () => {
+    Sound.setEnabled(!Sound.isEnabled());
+    if (Sound.isEnabled()) Sound.click();
+    updateSoundToggleIcon();
+  });
+  updateSoundToggleIcon();
 
   tryAutoRejoin();
 })();

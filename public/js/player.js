@@ -12,13 +12,26 @@
   let lastTicker = {}; // teamId -> "price:quantity" for whole-card flash-on-change
   let lastPriceByTeam = {};
   let lastQtyByTeam = {};
+  let lastTechByTeam = {};
+  let lastCapByTeam = {};
+  let lastLockByTeam = {};
   let priceTimer = null;
   let lastHistory = [];
   let charts = {};
   let confirmCallback = null;
+  let activeChannel = 'team'; // 'team' | 'global' - which negotiation channel tab is showing
+  let amILeader = false; // this device's current post permission in the All-Teams channel
+  let myLeaderName = null; // display name of whoever currently leads my team
 
   // ---------- small helpers ----------
   const $ = (id) => document.getElementById(id);
+  function injectIcons(root) {
+    (root || document).querySelectorAll('[data-icon]').forEach((el) => {
+      if (window.Icons && Icons[el.dataset.icon] != null) el.innerHTML = Icons[el.dataset.icon];
+    });
+  }
+  const CATEGORY_ICON = { CAPACITY: 'layers', COST: 'dollar', DEMAND: 'package', PRIORITY: 'target', MARKET: 'trending' };
+  const ACTION_ICON = { lock: 'lock', tech_up: 'cpu', tech_down: 'cpu', capacity_up: 'layers', capacity_down: 'layers' };
   function money(n) {
     n = Math.round(n || 0);
     return n < 0 ? '-$' + Math.abs(n).toLocaleString() : '$' + n.toLocaleString();
@@ -264,7 +277,7 @@
         '<span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' +
         '<span><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' + (t.teamId === myTeamId ? ' (me)' : '') + '</span>' +
         (t.isBot ? '' : '<span class="pill" style="margin-left:8px;">' + t.memberCount + '/' + t.maxMembers + '</span>') +
-        (t.isBot ? '<span class="badge badge-bot">BOT</span>' : '') +
+        (t.isBot ? '<span class="badge badge-bot">' + Icons.bot + ' BOT</span>' : '') +
         (!t.connected && !t.isBot ? '<span class="badge badge-offline">OFFLINE</span>' : '');
       list.appendChild(row);
     });
@@ -275,7 +288,9 @@
       me.members.forEach((m) => {
         const row = document.createElement('div');
         row.className = 'roster-row';
-        row.innerHTML = '<span class="dot ' + (m.connected ? 'on' : 'off') + '"></span><span>' + escapeHtml(m.memberName) + (m.connected ? '' : ' (offline)') + '</span>';
+        row.innerHTML =
+          '<span class="dot ' + (m.connected ? 'on' : 'off') + '"></span><span>' + escapeHtml(m.memberName) + (m.connected ? '' : ' (offline)') + '</span>' +
+          (m.isLeader ? '<span class="crown-badge" title="Team leader — can post in All Teams">' + Icons.crown + '</span>' : '');
         rosterList.appendChild(row);
       });
       $('lobby-roster-full-hint').textContent =
@@ -309,7 +324,8 @@
       return;
     }
     el.style.display = 'flex';
-    $('shock-tag').textContent = shock.categoryTag || 'MARKET';
+    const tag = shock.categoryTag || 'MARKET';
+    $('shock-tag').innerHTML = Icons[CATEGORY_ICON[tag] || 'trending'] + tag;
     $('shock-title').textContent = shock.title + (shock.source === 'ai' ? '' : '');
     $('shock-desc').textContent = shock.description;
     $('shock-impact').textContent = shock.impact || 'No numeric change this round.';
@@ -349,14 +365,21 @@
       lastTicker[t.teamId] = key;
       const priceHtml = valueHtml(t.teamId, t.price, lastPriceByTeam);
       const qtyHtml = valueHtml(t.teamId, t.quantity, lastQtyByTeam);
+      const techHtml = valueHtml(t.teamId, t.techLevel, lastTechByTeam);
+      const capHtml = valueHtml(t.teamId, t.capacityLevel, lastCapByTeam);
+      // A visible "just happened" ping the moment a team locks in (false ->
+      // true only, so it fires once, not on every re-render while locked).
+      const justLocked = lastLockByTeam[t.teamId] === false && t.locked === true;
+      lastLockByTeam[t.teamId] = t.locked;
       const card = document.createElement('div');
-      card.className = 'ticker-card' + (changed ? ' flash' : '') + (!t.connected && !t.isBot ? ' offline' : '');
+      card.className = 'ticker-card' + (changed ? ' flash' : '') + (justLocked ? ' lock-flash' : '') + (!t.connected && !t.isBot ? ' offline' : '');
       card.style.setProperty('border-left', '3px solid ' + colorFor(t.teamId));
       card.innerHTML =
-        '<div class="co">' + escapeHtml(t.teamName) + (t.teamId === myTeamId ? ' ★' : '') + '<span class="lock"><span class="status-dot ' + (t.locked ? 'locked' : 'open') + '" title="' + (t.locked ? 'Locked' : 'Not locked yet') + '"></span></span></div>' +
+        '<div class="co">' + escapeHtml(t.teamName) + (t.teamId === myTeamId ? ' <span class="pill" style="margin-left:6px; padding:2px 7px;">You</span>' : '') +
+        '<span class="lock"><span class="lock-indicator ' + (t.locked ? 'locked' : 'open') + '" title="' + (t.locked ? 'Locked' : 'Not locked yet') + '">' + (t.locked ? Icons.lock : Icons.unlock) + '</span></span></div>' +
         '<div class="row"><span>Price</span><b>$' + priceHtml + '</b></div>' +
         '<div class="row"><span>Qty</span><b>' + qtyHtml + '</b></div>' +
-        '<div class="row"><span>Tech / Cap</span><b>Lv' + t.techLevel + ' / Lv' + t.capacityLevel + '</b></div>';
+        '<div class="row"><span>Tech / Cap</span><b>Lv' + techHtml + ' / Lv' + capHtml + '</b></div>';
       el.appendChild(card);
     });
   }
@@ -405,10 +428,20 @@
     $('cap-cost').textContent = me.nextCapacityCost != null ? me.nextCapacityCost.toLocaleString() : '—';
     $('btn-buy-tech').disabled = me.locked || me.techLevel >= 5;
     $('btn-buy-cap').disabled = me.locked || me.capacityLevel >= 5;
-    $('btn-buy-tech').textContent = me.techLevel >= 5 ? 'Maxed' : 'Buy ($' + (me.nextTechCost || 0).toLocaleString() + ')';
-    $('btn-buy-cap').textContent = me.capacityLevel >= 5 ? 'Maxed' : 'Buy ($' + (me.nextCapacityCost || 0).toLocaleString() + ')';
+    // Target the inner label span, not the button itself - the button also
+    // holds a fixed icon-slot child that a raw textContent write would wipe.
+    $('btn-buy-tech-label').textContent = me.techLevel >= 5 ? 'Maxed' : 'Buy ($' + (me.nextTechCost || 0).toLocaleString() + ')';
+    $('btn-buy-cap-label').textContent = me.capacityLevel >= 5 ? 'Maxed' : 'Buy ($' + (me.nextCapacityCost || 0).toLocaleString() + ')';
     $('btn-undo-tech').disabled = me.locked || !me.canUndoTech;
     $('btn-undo-cap').disabled = me.locked || !me.canUndoCapacity;
+
+    // Team-leader state for the negotiation channel tabs (point 3): only
+    // the current leader can post in All Teams, so the composer needs to
+    // know both "am I the leader" and "who is, if not me".
+    amILeader = !!payload.amILeader;
+    const leaderMember = (me.members || []).find((m) => m.isLeader);
+    myLeaderName = leaderMember ? leaderMember.memberName : null;
+    updateChatComposer();
 
     const priceInput = $('in-price');
     const qtyInput = $('in-qty');
@@ -452,6 +485,7 @@
 
   // ---------- round-winner celebration (geometric particles, no emoji) ----------
   function triggerCelebration(revenue) {
+    Sound.victory();
     const overlay = $('celebration-overlay');
     const rain = $('money-rain');
     rain.innerHTML = '';
@@ -473,12 +507,14 @@
 
   // ---------- results / game over ----------
   function renderResults(payload) {
+    Sound.results();
     $('res-round').textContent = payload.round;
     $('res-mp').textContent = payload.marketPrice.toFixed(0);
     const shockEl = $('res-shock-banner');
     if (payload.shock) {
       shockEl.style.display = 'flex';
-      $('res-shock-tag').textContent = payload.shock.categoryTag || 'MARKET';
+      const tag = payload.shock.categoryTag || 'MARKET';
+      $('res-shock-tag').innerHTML = Icons[CATEGORY_ICON[tag] || 'trending'] + tag;
       $('res-shock-title').textContent = payload.shock.title;
       $('res-shock-desc').textContent = payload.shock.description;
       $('res-shock-impact').textContent = payload.shock.impact || 'No numeric change this round.';
@@ -492,7 +528,7 @@
       if (r.teamId === myTeamId) tr.classList.add('me');
       if (idx === 0) tr.classList.add('winner');
       tr.innerHTML =
-        '<td><b style="font-family:var(--display);">' + escapeHtml(r.teamName) + '</b></td>' +
+        '<td><b style="font-family:var(--display);">' + (idx === 0 ? '<span class="star-icon" style="color:var(--gold);">' + Icons.star + '</span> ' : '') + escapeHtml(r.teamName) + '</b></td>' +
         '<td>$' + r.price + '</td>' +
         '<td>' + r.quantitySold + '</td>' +
         '<td>' + money(r.revenue) + '</td>' +
@@ -509,6 +545,8 @@
   }
 
   function renderGameOver(payload) {
+    if (payload.winner && payload.winner.teamId === myTeamId) Sound.victory();
+    else Sound.results();
     $('final-winner-banner').textContent = payload.winner ? payload.winner.teamName + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
@@ -516,7 +554,7 @@
       const row = document.createElement('div');
       row.className = 'leaderboard-row' + (idx === 0 ? ' first' : '');
       row.innerHTML =
-        '<div class="rank">' + (idx + 1) + '</div>' +
+        '<div class="rank">' + (idx === 0 ? Icons.star + ' ' : '') + (idx + 1) + '</div>' +
         '<div class="name"><b style="font-family:var(--display);">' + escapeHtml(t.teamName) + '</b>' +
         '<div class="hint-text">capital ' + money(t.capital) + ' · inventory ' + t.inventory + ' (+' + money(t.inventory * 10) + ') · tech Lv' + t.techLevel + ' (+' + money(t.techLevel * 500) + ') · capacity Lv' + t.capacityLevel + ' (+' + money(t.capacityLevel * 500) + ')</div></div>' +
         '<div class="value">' + money(t.companyValue) + '</div>';
@@ -605,37 +643,104 @@
   }
   $('btn-download-csv').addEventListener('click', downloadMatchCSV);
 
-  // ---------- chat ----------
-  function appendChat(msg) {
-    const log = $('chat-log');
+  // ---------- chat (Team channel + All-Teams channel) ----------
+  function chatLogEl(channel) {
+    return $(channel === 'global' ? 'chat-log-global' : 'chat-log-team');
+  }
+  function appendChatBubble(msg) {
+    const log = chatLogEl(msg.channel);
     const row = document.createElement('div');
     row.className = 'chat-msg';
     row.innerHTML = '<span class="who" style="color:' + colorFor(msg.name) + '">' + escapeHtml(msg.name) + ':</span> ' + escapeHtml(msg.text);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
-  function appendSystemChat(text) {
-    const log = $('chat-log');
+  // Auto-posted "who did what" row (the kill-feed) - always lands in
+  // whichever log msg.channel says (in practice always 'global', since
+  // that's the one channel every team can see).
+  function appendKillfeed(msg) {
+    const log = chatLogEl(msg.channel);
     const row = document.createElement('div');
-    row.className = 'chat-msg';
-    row.style.color = 'var(--red)';
-    row.textContent = text;
+    row.className = 'chat-msg system act-' + (msg.actionType || '');
+    const icon = Icons[ACTION_ICON[msg.actionType]] || Icons.trending;
+    row.innerHTML = '<span class="act-icon">' + icon + '</span><b>' + escapeHtml(msg.name) + '</b> ' + escapeHtml(msg.text);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
+  function appendBlockedNotice(reason) {
+    // Feedback on a post attempt always lands wherever that device's
+    // composer is currently pointed, not necessarily 'global'.
+    Sound.error();
+    const log = chatLogEl(activeChannel);
+    const row = document.createElement('div');
+    row.className = 'chat-msg';
+    row.style.color = 'var(--red)';
+    row.textContent = reason;
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+  function routeChatMessage(msg) {
+    if (msg.kind === 'system') appendKillfeed(msg);
+    else appendChatBubble(msg);
+  }
+  function updateChatComposer() {
+    document.querySelectorAll('.channel-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.channel === activeChannel));
+    chatLogEl('team').style.display = activeChannel === 'team' ? 'block' : 'none';
+    chatLogEl('global').style.display = activeChannel === 'global' ? 'block' : 'none';
+    const input = $('chat-input');
+    const sendBtn = $('btn-chat-send');
+    const hint = $('channel-hint');
+    const canPost = activeChannel === 'team' || amILeader;
+    input.disabled = !canPost;
+    sendBtn.disabled = !canPost;
+    input.placeholder = canPost ? 'Talk, threaten, promise, bluff…' : 'Only your team leader can post here';
+    if (activeChannel !== 'global') {
+      hint.innerHTML = '';
+    } else if (amILeader) {
+      hint.innerHTML = Icons.crown + '<span>You are the team leader — you can post here for your team.</span>';
+    } else if (myLeaderName) {
+      hint.innerHTML = Icons.crown + '<span><b style="color:var(--ink);">' + escapeHtml(myLeaderName) + '</b> is your team leader — only they can post here. You can still read along.</span>';
+    } else {
+      hint.innerHTML = 'Only your team leader can post here. You can still read along.';
+    }
+  }
+  function switchChannel(channel) {
+    activeChannel = channel === 'global' ? 'global' : 'team';
+    updateChatComposer();
+  }
   function sendChat() {
     const input = $('chat-input');
+    if (input.disabled) return;
     const text = input.value.trim();
     if (!text) return;
-    socket.emit('CHAT_MESSAGE', { roomCode: myRoomCode, teamId: myTeamId, text });
+    Sound.tick();
+    socket.emit('CHAT_MESSAGE', { roomCode: myRoomCode, teamId: myTeamId, channel: activeChannel, text });
     input.value = '';
   }
 
   // ---------- wire up ----------
-  $('btn-buy-tech').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
-  $('btn-buy-cap').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
-  $('btn-undo-tech').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
-  $('btn-undo-cap').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
+  $('btn-buy-tech').addEventListener('click', () => {
+    Sound.buy();
+    Juice.squish($('btn-buy-tech'));
+    Juice.burst($('btn-buy-tech'), { color: 'var(--gold)' });
+    socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' });
+  });
+  $('btn-buy-cap').addEventListener('click', () => {
+    Sound.buy();
+    Juice.squish($('btn-buy-cap'));
+    Juice.burst($('btn-buy-cap'), { color: 'var(--gold)' });
+    socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' });
+  });
+  $('btn-undo-tech').addEventListener('click', () => {
+    Sound.undo();
+    Juice.squish($('btn-undo-tech'));
+    socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' });
+  });
+  $('btn-undo-cap').addEventListener('click', () => {
+    Sound.undo();
+    Juice.squish($('btn-undo-cap'));
+    socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' });
+  });
   $('in-price').addEventListener('input', sendInputUpdate);
   $('in-qty').addEventListener('input', sendInputUpdate);
   $('btn-lockin').addEventListener('click', () => {
@@ -645,14 +750,25 @@
     if (qty === 0 && price === 0) warning = "You're about to lock in with $0 price AND 0 units offered — Apple can't buy anything from you this round.";
     else if (qty === 0) warning = "You're about to lock in with 0 units offered — Apple can't buy anything from you this round.";
     else if (price === 0) warning = "You're about to lock in with a $0 price — Apple would get your chips for free.";
+    const doLock = () => {
+      Sound.lockIn();
+      Juice.squish($('btn-lockin'));
+      Juice.burst($('btn-lockin'), { color: 'var(--gold)', count: 10 });
+      socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId });
+    };
     if (warning) {
-      showConfirm('Lock in anyway?', warning, 'Lock In Anyway', () => socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId }));
+      showConfirm('Lock in anyway?', warning, 'Lock In Anyway', doLock);
       return;
     }
-    socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId });
+    doLock();
   });
   $('btn-chat-send').addEventListener('click', sendChat);
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+  document.querySelectorAll('.channel-tab').forEach((btn) => btn.addEventListener('click', () => {
+    Sound.click();
+    Juice.squish(btn);
+    switchChannel(btn.dataset.channel);
+  }));
 
   socket.on('LOBBY_UPDATE', (payload) => {
     if (!myTeamId || !payload.teams.some((t) => t.teamId === myTeamId)) return;
@@ -671,7 +787,11 @@
   socket.on('ROUND_START', (payload) => {
     lastTicker = {};
     routeScreen('round_active');
-    if (payload && payload.shock) renderShock(payload.shock);
+    if (payload && payload.shock) {
+      renderShock(payload.shock);
+      Sound.shock();
+      Juice.shake($('shock-banner'));
+    }
   });
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));
   socket.on('ROUND_RESULT', (payload) => {
@@ -682,8 +802,14 @@
     renderGameOver(payload);
     routeScreen('game_over');
   });
-  socket.on('CHAT_MESSAGE', appendChat);
-  socket.on('CHAT_BLOCKED', ({ reason }) => appendSystemChat(reason || 'Message blocked.'));
+  socket.on('CHAT_MESSAGE', routeChatMessage);
+  socket.on('CHAT_BLOCKED', ({ reason }) => appendBlockedNotice(reason || 'Message blocked.'));
+  socket.on('CHAT_SYNC', (payload) => {
+    chatLogEl('team').innerHTML = '';
+    chatLogEl('global').innerHTML = '';
+    (payload.team || []).forEach(routeChatMessage);
+    (payload.global || []).forEach(routeChatMessage);
+  });
   socket.on('ROOM_CLOSED', ({ reason }) => {
     showConfirm('Room closed', reason || 'The host has closed this room.', 'OK', () => {
       forgetSession();
@@ -713,6 +839,21 @@
     }
   });
 
+  function updateSoundToggleIcon() {
+    const btn = $('btn-sound-toggle');
+    const on = Sound.isEnabled();
+    btn.classList.toggle('muted', !on);
+    btn.querySelector('.icon-slot').innerHTML = on ? Icons.volume : Icons.volumeOff;
+  }
+  $('btn-sound-toggle').addEventListener('click', () => {
+    Sound.setEnabled(!Sound.isEnabled());
+    if (Sound.isEnabled()) Sound.click();
+    updateSoundToggleIcon();
+  });
+
+  injectIcons();
+  updateSoundToggleIcon();
+  updateChatComposer();
   showStep('roomcode');
   tryAutoRejoin();
 })();
