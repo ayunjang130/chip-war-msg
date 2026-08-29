@@ -128,6 +128,11 @@ for 30+ minutes, so long-running public deployments don't leak memory.
       with an explicit banned-jargon list (no "multiplier", "elasticity",
       "weight", etc.) so a reader with zero economics background gets it
       in one pass
+- [x] Synthesized sound (Web Audio oscillators, no audio files) + physical
+      "juice" feedback (button squish, particle bursts, screen-shake
+      reserved for rare moments, numbers that roll instead of snap) wired
+      into Buy/Undo/Lock In/chat/tab-switching/Market Shock/round results/
+      victory - with a persistent, always-visible mute toggle
 
 ## Team names replace "team name + cosmetic company name"
 
@@ -379,6 +384,44 @@ host-only raw multiplier view (`host.js`'s `summarizeEffects()`) keeps
 its precise `×1.65`-style notation on purpose, since that one's written
 for the teacher running the match, not a 15-year-old reading it once.
 
+## Sound + physical feedback ("juice")
+
+Two small, dependency-free modules loaded before `player.js`/`host.js`:
+
+- **`public/js/sound.js`** — every effect is a synthesized oscillator +
+  envelope (`tone(freq, duration, opts)`), not an audio file. No asset to
+  host, no CDN, works offline once the page is loaded. 9 effects (`click`,
+  `tick`, `buy`, `undo`, `error`, `lockIn`, `shock`, `results`, `victory`),
+  each 1-4 `tone()` calls. Respects the browser autoplay policy by lazily
+  creating/resuming the `AudioContext` on the page's first `pointerdown`/
+  `keydown`. On/off state persists via `localStorage` (this app already
+  uses it for reconnection, so it's not a new pattern) and is exposed via
+  a fixed mute button (top-right, every screen, `z-index:45` - deliberately
+  *below* modals/celebration so those still cover it rather than floating
+  on top of a confirm dialog).
+- **`public/js/juice.js`** — `squish()`/`shake()`/`flashLevelUp()` (CSS
+  class retrigger, remove+reflow+re-add so repeated calls actually restart
+  the animation), `countUp()` (ease-out number roll instead of an instant
+  snap), `burst()` (a handful of DOM dots flying out from an element and
+  fading - the same shape as the existing money-rain celebration,
+  generalized to fire from any button).
+
+Wired into: Buy/Undo Tech+Capacity (sound + squish + burst on Buy), Lock In
+(sound + squish + a bigger burst - the single most significant click in a
+round), sending chat (a deliberately quiet tick, since this fires often),
+switching negotiation-channel tabs, a blocked chat attempt, a new Market
+Shock landing at round start (sound + a shake on the banner - `shake()` is
+saved for genuinely rare/big moments on purpose, not routine actions, so it
+still reads as "something happened" when it fires), round results
+appearing, and both the round-winner celebration and the final game-over
+banner (a real fanfare if your own team won, a calmer tone otherwise, so a
+losing team doesn't get an oddly triumphant sting on their loss).
+
+Deliberately not in this pass (needs new server-side state, better done as
+its own follow-up): a bottom-up dramatic reveal for the results table,
+near-miss ("you missed 1st by 3 points") callouts, and streak/comeback
+badges.
+
 ## What to expand next
 
 1. **Language.** UI is English-only right now. If the audience is genuinely
@@ -397,3 +440,6 @@ for the teacher running the match, not a 15-year-old reading it once.
 5. **Stronger moderation.** The profanity filter is a basic word list, not
    an NLP system — fine for a classroom, but a real moderation API would
    close the "creative misspelling" gap if this ever goes fully public.
+6. **Results-reveal choreography, near-miss callouts, streaks/comebacks.**
+   See "Sound + physical feedback" above - the juice layer's hooks are
+   already in place, these three need new server-side computation first.

@@ -312,6 +312,7 @@
   }
 
   function renderRoundResults(payload) {
+    Sound.results();
     const body = $('live-results-body');
     body.innerHTML = '';
     payload.results.forEach((r) => {
@@ -328,6 +329,7 @@
   }
 
   function renderGameOver(payload) {
+    Sound.victory();
     $('final-winner-banner').textContent = payload.winner ? payload.winner.teamName + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
@@ -472,7 +474,13 @@
     routeScreen('round_active');
     showShockLoading();
   });
-  socket.on('ROUND_START', () => routeScreen('round_active'));
+  socket.on('ROUND_START', (payload) => {
+    routeScreen('round_active');
+    if (payload && payload.shock) {
+      Sound.shock();
+      Juice.shake($('shock-banner'));
+    }
+  });
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));
   socket.on('ROUND_RESULT', (payload) => {
     renderRoundResults(payload);
@@ -489,5 +497,19 @@
   });
 
   injectIcons();
+
+  function updateSoundToggleIcon() {
+    const btn = $('btn-sound-toggle');
+    const on = Sound.isEnabled();
+    btn.classList.toggle('muted', !on);
+    btn.querySelector('.icon-slot').innerHTML = on ? Icons.volume : Icons.volumeOff;
+  }
+  $('btn-sound-toggle').addEventListener('click', () => {
+    Sound.setEnabled(!Sound.isEnabled());
+    if (Sound.isEnabled()) Sound.click();
+    updateSoundToggleIcon();
+  });
+  updateSoundToggleIcon();
+
   tryAutoRejoin();
 })();

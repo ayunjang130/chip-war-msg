@@ -485,6 +485,7 @@
 
   // ---------- round-winner celebration (geometric particles, no emoji) ----------
   function triggerCelebration(revenue) {
+    Sound.victory();
     const overlay = $('celebration-overlay');
     const rain = $('money-rain');
     rain.innerHTML = '';
@@ -506,6 +507,7 @@
 
   // ---------- results / game over ----------
   function renderResults(payload) {
+    Sound.results();
     $('res-round').textContent = payload.round;
     $('res-mp').textContent = payload.marketPrice.toFixed(0);
     const shockEl = $('res-shock-banner');
@@ -543,6 +545,8 @@
   }
 
   function renderGameOver(payload) {
+    if (payload.winner && payload.winner.teamId === myTeamId) Sound.victory();
+    else Sound.results();
     $('final-winner-banner').textContent = payload.winner ? payload.winner.teamName + ' wins' : 'Game over';
     const el = $('final-leaderboard');
     el.innerHTML = '';
@@ -666,6 +670,7 @@
   function appendBlockedNotice(reason) {
     // Feedback on a post attempt always lands wherever that device's
     // composer is currently pointed, not necessarily 'global'.
+    Sound.error();
     const log = chatLogEl(activeChannel);
     const row = document.createElement('div');
     row.className = 'chat-msg';
@@ -708,15 +713,34 @@
     if (input.disabled) return;
     const text = input.value.trim();
     if (!text) return;
+    Sound.tick();
     socket.emit('CHAT_MESSAGE', { roomCode: myRoomCode, teamId: myTeamId, channel: activeChannel, text });
     input.value = '';
   }
 
   // ---------- wire up ----------
-  $('btn-buy-tech').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
-  $('btn-buy-cap').addEventListener('click', () => socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
-  $('btn-undo-tech').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' }));
-  $('btn-undo-cap').addEventListener('click', () => socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' }));
+  $('btn-buy-tech').addEventListener('click', () => {
+    Sound.buy();
+    Juice.squish($('btn-buy-tech'));
+    Juice.burst($('btn-buy-tech'), { color: 'var(--gold)' });
+    socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' });
+  });
+  $('btn-buy-cap').addEventListener('click', () => {
+    Sound.buy();
+    Juice.squish($('btn-buy-cap'));
+    Juice.burst($('btn-buy-cap'), { color: 'var(--gold)' });
+    socket.emit('TEAM_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' });
+  });
+  $('btn-undo-tech').addEventListener('click', () => {
+    Sound.undo();
+    Juice.squish($('btn-undo-tech'));
+    socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'tech' });
+  });
+  $('btn-undo-cap').addEventListener('click', () => {
+    Sound.undo();
+    Juice.squish($('btn-undo-cap'));
+    socket.emit('TEAM_UNDO_INVEST', { roomCode: myRoomCode, teamId: myTeamId, kind: 'capacity' });
+  });
   $('in-price').addEventListener('input', sendInputUpdate);
   $('in-qty').addEventListener('input', sendInputUpdate);
   $('btn-lockin').addEventListener('click', () => {
@@ -726,15 +750,25 @@
     if (qty === 0 && price === 0) warning = "You're about to lock in with $0 price AND 0 units offered — Apple can't buy anything from you this round.";
     else if (qty === 0) warning = "You're about to lock in with 0 units offered — Apple can't buy anything from you this round.";
     else if (price === 0) warning = "You're about to lock in with a $0 price — Apple would get your chips for free.";
+    const doLock = () => {
+      Sound.lockIn();
+      Juice.squish($('btn-lockin'));
+      Juice.burst($('btn-lockin'), { color: 'var(--gold)', count: 10 });
+      socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId });
+    };
     if (warning) {
-      showConfirm('Lock in anyway?', warning, 'Lock In Anyway', () => socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId }));
+      showConfirm('Lock in anyway?', warning, 'Lock In Anyway', doLock);
       return;
     }
-    socket.emit('LOCK_IN', { roomCode: myRoomCode, teamId: myTeamId });
+    doLock();
   });
   $('btn-chat-send').addEventListener('click', sendChat);
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
-  document.querySelectorAll('.channel-tab').forEach((btn) => btn.addEventListener('click', () => switchChannel(btn.dataset.channel)));
+  document.querySelectorAll('.channel-tab').forEach((btn) => btn.addEventListener('click', () => {
+    Sound.click();
+    Juice.squish(btn);
+    switchChannel(btn.dataset.channel);
+  }));
 
   socket.on('LOBBY_UPDATE', (payload) => {
     if (!myTeamId || !payload.teams.some((t) => t.teamId === myTeamId)) return;
@@ -753,7 +787,11 @@
   socket.on('ROUND_START', (payload) => {
     lastTicker = {};
     routeScreen('round_active');
-    if (payload && payload.shock) renderShock(payload.shock);
+    if (payload && payload.shock) {
+      renderShock(payload.shock);
+      Sound.shock();
+      Juice.shake($('shock-banner'));
+    }
   });
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));
   socket.on('ROUND_RESULT', (payload) => {
@@ -801,7 +839,20 @@
     }
   });
 
+  function updateSoundToggleIcon() {
+    const btn = $('btn-sound-toggle');
+    const on = Sound.isEnabled();
+    btn.classList.toggle('muted', !on);
+    btn.querySelector('.icon-slot').innerHTML = on ? Icons.volume : Icons.volumeOff;
+  }
+  $('btn-sound-toggle').addEventListener('click', () => {
+    Sound.setEnabled(!Sound.isEnabled());
+    if (Sound.isEnabled()) Sound.click();
+    updateSoundToggleIcon();
+  });
+
   injectIcons();
+  updateSoundToggleIcon();
   updateChatComposer();
   showStep('roomcode');
   tryAutoRejoin();

@@ -369,3 +369,25 @@ h3 .info-tip{ text-transform:none; letter-spacing:0; }
 /* ---------- host live table: same lock ping, row-scoped ---------- */
 @keyframes rowFlash{ 0%{ background:rgba(240,180,41,0.22); } 100%{ background:transparent; } }
 tr.lock-flash{ animation: rowFlash .8s ease-out; }
+
+/* ---------- juice: physical feedback for actions (points 1-2 of the "game feel" pass) ---------- */
+@keyframes juiceSquish{ 0%{ transform:scale(1); } 40%{ transform:scale(0.93); } 100%{ transform:scale(1); } }
+.juice-squish{ animation: juiceSquish .22s ease-out; }
+@keyframes juiceShake{ 0%,100%{ transform:translateX(0); } 20%{ transform:translateX(-4px); } 40%{ transform:translateX(4px); } 60%{ transform:translateX(-3px); } 80%{ transform:translateX(3px); } }
+.juice-shake{ animation: juiceShake .35s ease-in-out; }
+@keyframes juiceLevelUp{ 0%{ box-shadow:0 0 0 0 rgba(240,180,41,0.7); background:rgba(240,180,41,0.35); } 100%{ box-shadow:0 0 0 14px rgba(240,180,41,0); background:transparent; } }
+.juice-levelup{ animation: juiceLevelUp .6s ease-out; border-radius:6px; }
+@keyframes juiceParticle{ 0%{ transform:translate(-50%,-50%) scale(1); opacity:1; } 100%{ transform:translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.3); opacity:0; } }
+.juice-particle{ position:fixed; width:6px; height:6px; border-radius:50%; pointer-events:none; z-index:9999; animation: juiceParticle .6s ease-out forwards; }
+
+/* ---------- sound mute toggle (fixed, visible on every screen) ---------- */
+.sound-toggle{
+  position:fixed; top:16px; right:16px; z-index:45;
+  display:flex; align-items:center; justify-content:center;
+  width:36px; height:36px; border-radius:50%;
+  background:var(--panel-2); border:1px solid var(--line); color:var(--ink-dim);
+  cursor:pointer;
+}
+.sound-toggle:hover{ color:var(--ink); border-color:var(--ink-dim); }
+.sound-toggle .icon{ width:16px; height:16px; }
+.sound-toggle.muted{ color:var(--red); border-color:rgba(226,75,74,0.4); }
