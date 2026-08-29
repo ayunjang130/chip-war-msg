@@ -24,6 +24,7 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/host', (req, res) => res.sendFile(path.join(__dirname, 'public', 'host.html')));
+app.get('/broadcast', (req, res) => res.sendFile(path.join(__dirname, 'public', 'broadcast.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const PORT = process.env.PORT || 3000;
@@ -129,6 +130,9 @@ function createRoom(hostSocketId) {
     shockHistory: [],
     lastResultsPayload: null,
     finalPayload: null,
+    // Read-only "broadcast" viewers (the classroom-projector screen) - never
+    // tied to a team, never see anyone's capital. See SPECTATE_ROOM below.
+    spectatorSocketIds: new Set(),
     config: {
       weights: { ...engine.CONFIG.WEIGHTS_DEFAULT },
       demandPerTeam: engine.CONFIG.DEMAND_PER_TEAM,
@@ -222,6 +226,28 @@ function broadcastState(room) {
       shock: publicShock(room.activeShock, true),
       teams: teamList.map((t) => publicTeam(t, null, true, room))
     });
+  }
+
+  // Broadcast/spectator view (the shared projector screen): same shape a
+  // regular player already sees for every OTHER team - no capital, no
+  // privileged host fields. viewerTeamId=null + isPrivileged=false is
+  // exactly that "public only" case publicTeam() already implements, so
+  // this is the same trust boundary as the live ticker, just fanned out to
+  // sockets that aren't on any team.
+  if (room.spectatorSocketIds && room.spectatorSocketIds.size) {
+    const spectatorPayload = {
+      round: room.round,
+      totalRounds: engine.CONFIG.ROUNDS,
+      phase: room.phase,
+      timeLeft: room.timeLeft,
+      paused: room.paused,
+      marketPrice: room.marketPrice,
+      demandPerTeam: effectiveDemandPerTeam,
+      totalDemand,
+      shock: publicShock(room.activeShock, false),
+      teams: teamList.map((t) => publicTeam(t, null, false, room))
+    };
+    room.spectatorSocketIds.forEach((sid) => io.to(sid).emit('STATE_SYNC', spectatorPayload));
   }
 }
 
@@ -716,6 +742,25 @@ io.on('connection', (socket) => {
       });
   });
 
+  // Read-only "broadcast" join - the classroom-projector screen. No teamId,
+  // no host privileges: just a socket that watches the same public state
+  // everyone already sees on the live ticker.
+  socket.on('SPECTATE_ROOM', ({ roomCode }, cb) => {
+    const room = rooms[roomCode];
+    if (!room) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
+    socket.join(room.code);
+    socketMeta[socket.id] = { roomCode, role: 'spectator' };
+    room.spectatorSocketIds = room.spectatorSocketIds || new Set();
+    room.spectatorSocketIds.add(socket.id);
+    cb && cb({ ok: true, roomCode: room.code });
+    broadcastState(room);
+    if (room.phase === 'round_results' && room.lastResultsPayload) {
+      io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
+    } else if (room.phase === 'game_over' && room.finalPayload) {
+      io.to(socket.id).emit('GAME_OVER', room.finalPayload);
+    }
+  });
+
   socket.on('JOIN_ROOM', ({ roomCode, teamName, teamId, memberId, memberName }, cb) => {
     const room = rooms[roomCode];
     if (!room) return cb && cb({ ok: false, error: 'ROOM_NOT_FOUND' });
@@ -1018,6 +1063,7 @@ io.on('connection', (socket) => {
         if (m.socketId) delete socketMeta[m.socketId];
       });
     });
+    if (room.spectatorSocketIds) room.spectatorSocketIds.forEach((sid) => delete socketMeta[sid]);
     delete socketMeta[socket.id];
     delete rooms[roomCode];
   });
@@ -1077,6 +1123,8 @@ io.on('connection', (socket) => {
         broadcastState(room);
       } else if (meta.role === 'host' && room.hostSocketId === socket.id) {
         room.hostSocketId = null;
+      } else if (meta.role === 'spectator' && room.spectatorSocketIds) {
+        room.spectatorSocketIds.delete(socket.id);
       }
     }
     delete socketMeta[socket.id];

@@ -391,3 +391,74 @@ tr.lock-flash{ animation: rowFlash .8s ease-out; }
 .sound-toggle:hover{ color:var(--ink); border-color:var(--ink-dim); }
 .sound-toggle .icon{ width:16px; height:16px; }
 .sound-toggle.muted{ color:var(--red); border-color:rgba(226,75,74,0.4); }
+
+/* ================= BROADCAST (shared/projector) SCREEN ================= */
+/* Read-only, dark, oversized-for-distance viewing - a separate mini-app
+   from index.html/host.html on purpose (see broadcast.html/broadcast.js) so
+   its layout can be a single full-height stage instead of a scrolling page. */
+.bc-body{ height:100vh; overflow:hidden; }
+.bc-screen{ display:none; height:100vh; }
+.bc-screen.active{ display:flex; flex-direction:column; }
+#bc-entry.active, #bc-closed.active{ align-items:center; justify-content:center; }
+
+.bc-entry-card{
+  background:var(--panel); border:1px solid var(--line); border-radius:16px;
+  padding:40px 44px; text-align:center; max-width:420px; width:100%;
+}
+.bc-entry-card h1{ font-family:var(--display); font-size:28px; margin:8px 0 6px; }
+.bc-entry-sub{ color:var(--ink-dim); font-size:13.5px; margin:0 0 22px; line-height:1.5; }
+.bc-room-input{
+  width:100%; text-align:center; font-family:var(--mono); font-size:22px; letter-spacing:.18em;
+  text-transform:uppercase; padding:14px; border-radius:10px; border:1px solid var(--line);
+  background:var(--panel-2); color:var(--ink); margin-bottom:14px;
+}
+.bc-entry-error{ color:var(--red); font-size:13px; min-height:18px; margin:12px 0 0; }
+
+.bc-header{
+  display:flex; align-items:center; padding:20px 36px; flex-shrink:0;
+  border-bottom:1px solid var(--line); background:rgba(10,14,20,0.6);
+}
+.bc-header-block{ flex:1; }
+.bc-header-block + .bc-header-block{ border-left:1px solid var(--line-soft); padding-left:28px; margin-left:28px; }
+.bc-label{
+  font-family:var(--mono); font-size:12px; color:var(--ink-dim); text-transform:uppercase;
+  letter-spacing:.1em; display:flex; align-items:center; gap:6px; margin-bottom:4px;
+}
+.bc-label .icon{ width:13px; height:13px; }
+.bc-value{ font-family:var(--display); font-size:30px; font-weight:700; }
+.bc-timer{ color:var(--gold); }
+.bc-timer.low{ color:var(--red); }
+
+#bc-stage{ flex:1; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+#bc-stage canvas{ display:block; }
+
+.bc-shock-banner{
+  display:none; align-items:center; gap:16px; padding:12px 36px;
+  border-bottom:1px solid var(--line); background:rgba(240,180,41,0.06); flex-shrink:0;
+}
+.bc-shock-banner.active{ display:flex; }
+.bc-shock-tag{
+  font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--gold);
+  border:1px solid rgba(240,180,41,0.4); border-radius:6px; padding:5px 10px;
+  display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap;
+}
+.bc-shock-tag .icon{ width:13px; height:13px; }
+.bc-shock-title{ font-family:var(--display); font-size:17px; font-weight:700; flex-shrink:0; }
+.bc-shock-desc{ color:var(--ink-dim); font-size:14px; }
+
+.bc-results-overlay{
+  display:none; position:absolute; inset:0; background:rgba(5,7,12,0.92);
+  flex-direction:column; align-items:center; justify-content:center; padding:40px;
+}
+.bc-results-overlay.active{ display:flex; }
+.bc-results-overlay h2{ font-family:var(--display); font-size:32px; margin:6px 0 24px; }
+.bc-results-table{ width:100%; max-width:720px; }
+.bc-results-row{
+  display:flex; align-items:center; gap:16px; padding:12px 20px; border-radius:10px;
+  background:var(--panel-2); margin-bottom:8px; font-family:var(--mono); font-size:15px;
+}
+.bc-results-row .rank{ width:28px; font-family:var(--display); font-weight:700; color:var(--ink-dim); }
+.bc-results-row.first{ border:1px solid var(--gold); background:rgba(240,180,41,0.08); }
+.bc-results-row.first .rank{ color:var(--gold); }
+.bc-results-row .name{ flex:1; font-family:var(--display); font-weight:700; }
+.bc-results-hint{ color:var(--ink-dim); font-size:13px; margin-top:20px; }

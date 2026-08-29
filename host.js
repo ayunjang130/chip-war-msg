@@ -498,6 +498,11 @@
 
   injectIcons();
 
+  $('btn-open-broadcast').addEventListener('click', () => {
+    if (!myRoomCode) return;
+    window.open('/broadcast?room=' + encodeURIComponent(myRoomCode), '_blank');
+  });
+
   function updateSoundToggleIcon() {
     const btn = $('btn-sound-toggle');
     const on = Sound.isEnabled();
