@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chip War — Broadcast</title>
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+<script src="/js/icons.js"></script>
+</head>
+<body class="bc-body">
+
+<div id="bc-entry" class="bc-screen active">
+  <div class="bc-entry-card">
+    <p class="eyebrow">chip war — broadcast</p>
+    <h1>Share screen</h1>
+    <p class="bc-entry-sub">Read-only — for projecting the match. No controls, no private data.</p>
+    <input id="bc-room-input" class="bc-room-input" placeholder="ROOM CODE" maxlength="6" autocomplete="off">
+    <button id="bc-connect-btn" class="btn btn-gold btn-block">Connect</button>
+    <p id="bc-entry-error" class="bc-entry-error"></p>
+  </div>
+</div>
+
+<div id="bc-main" class="bc-screen">
+  <div class="bc-header">
+    <div class="bc-header-block">
+      <div class="bc-label">Room</div>
+      <div class="bc-value" id="bc-room-code">—</div>
+    </div>
+    <div class="bc-header-block">
+      <div class="bc-label">Round</div>
+      <div class="bc-value" id="bc-round">— / —</div>
+    </div>
+    <div class="bc-header-block bc-timer-block">
+      <div class="bc-label"><span class="icon-slot" data-icon="clock"></span>Time</div>
+      <div class="bc-value bc-timer" id="bc-timer">—</div>
+    </div>
+    <div class="bc-header-block">
+      <div class="bc-label"><span class="icon-slot" data-icon="dollar"></span>Market price</div>
+      <div class="bc-value" id="bc-mp">—</div>
+    </div>
+    <div class="bc-header-block">
+      <div class="bc-label"><span class="icon-slot" data-icon="package"></span>Apple demand</div>
+      <div class="bc-value" id="bc-demand">—</div>
+    </div>
+  </div>
+
+  <div id="bc-stage"></div>
+
+  <div id="bc-shock-banner" class="bc-shock-banner">
+    <div class="bc-shock-tag" id="bc-shock-tag"></div>
+    <div class="bc-shock-title" id="bc-shock-title"></div>
+    <div class="bc-shock-desc" id="bc-shock-desc"></div>
+  </div>
+
+  <div id="bc-results-overlay" class="bc-results-overlay">
+    <p class="eyebrow" id="bc-results-eyebrow">round results</p>
+    <h2 id="bc-results-title">Round 1</h2>
+    <div id="bc-results-table" class="bc-results-table"></div>
+    <p class="bc-results-hint" id="bc-results-hint">Next round starting…</p>
+  </div>
+</div>
+
+<div id="bc-closed" class="bc-screen">
+  <div class="bc-entry-card">
+    <h1>Room closed</h1>
+    <p class="bc-entry-sub" id="bc-closed-reason">The host has closed this room.</p>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/broadcast.js"></script>
+</body>
+</html>

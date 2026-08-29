@@ -8,8 +8,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/js/icons.js"></script>
+<script src="/js/sound.js"></script>
+<script src="/js/juice.js"></script>
 </head>
 <body>
+
+<button class="sound-toggle" id="btn-sound-toggle" type="button" aria-label="Toggle sound"><span class="icon-slot" data-icon="volume"></span></button>
 
 <!-- ============ SCREEN: SETUP ============ -->
 <section id="screen-setup" class="screen active">
@@ -31,6 +36,8 @@
     <p class="eyebrow">room open</p>
     <h1>Room code: <span id="lobby-roomcode" style="color:var(--gold)">—</span></h1>
     <p>Share this code with your players. They join at this server's root address.</p>
+    <button class="btn btn-gold btn-icon" id="btn-open-broadcast" type="button" style="margin-top:10px;"><span class="icon-slot" data-icon="grid"></span>Open share screen</button>
+    <p class="hint-text" style="margin-top:6px;">Opens a read-only, projector-friendly view in a new tab — no controls, no private data. Put it on the classroom screen and leave your own dashboard here.</p>
     <p class="pill" id="ai-shock-status" style="margin-top:8px;">—</p>
 
     <div class="two-col" style="margin-top:20px; align-items:start;">
@@ -180,11 +187,12 @@
     </div>
 
     <div class="card">
-      <h3>Negotiation channel (read-only + host announcements)</h3>
+      <h3><span class="icon-slot" data-icon="grid"></span> All-Teams channel <span class="hint-text">(read-only + host announcements)</span></h3>
+      <div class="hint-text" style="margin-bottom:8px;">Each team also has its own private Team channel — that one stays between teammates and isn't shown here.</div>
       <div class="chat-log" id="chat-log"></div>
       <div class="chat-row">
         <input id="chat-input" maxlength="240" placeholder="Send an announcement as HOST…">
-        <button class="btn btn-sm" id="btn-chat-send">Send</button>
+        <button class="btn btn-sm btn-icon" id="btn-chat-send"><span class="icon-slot" data-icon="send"></span>Send</button>
       </div>
     </div>
 
@@ -244,7 +252,7 @@
     </div>
     <div class="howto-step">
       <div class="num">2</div>
-      <div class="txt"><b>Price &amp; quantity, live</b><p>Everyone sees everyone else's numbers update in real time on the ticker board — that's the bluffing/negotiation part. They can change their numbers until they lock in.</p></div>
+      <div class="txt"><b>Price &amp; quantity, live</b><p>Everyone sees everyone else's numbers update in real time on the ticker board — that's the bluffing/negotiation part. Each team also gets a private Team channel plus an All-Teams channel where only each team's leader can post (everyone can still read it) — you can see and post in the All-Teams one below. They can change their numbers until they lock in.</p></div>
     </div>
     <div class="howto-step">
       <div class="num">3</div>
@@ -254,7 +262,7 @@
       <div class="num">4</div>
       <div class="txt"><b>After Round 6</b><p>Highest total Company Value (cash + leftover chips + tech + capacity) wins. You control pacing with Pause / Resume / Force skip below.</p></div>
     </div>
-    <div class="howto-formula">Every round also rolls one random <b style="color:var(--ink)">Market Shock</b> that temporarily changes the rules — e.g. Capacity efficiency down, or Apple weighing Tech higher. It's what stops the same build order from winning every match. Players see the plain-language version; you see the exact numbers behind it too.</div>
+    <div class="howto-formula">Every round also rolls one random <b style="color:var(--ink)">Market Shock</b> that temporarily changes the rules — e.g. a supplier outage means fewer chips get made, or Apple suddenly cares more about Tech. It's what stops the same build order from winning every match. Players see one plain sentence explaining it in real-world terms; you see the exact numbers behind it too.</div>
     <button class="btn btn-gold btn-block" id="btn-howto-gotit" style="margin-top:18px;">Close</button>
   </div>
 </div>

@@ -213,15 +213,22 @@ tr.winner td:first-child{ color: var(--gold); }
 .rank-preview.caution{ color:var(--gold); }
 .rank-preview.risk{ color:var(--red); }
 
-/* ---------- lock/open status indicator (replaces lock/hourglass icons) ---------- */
-.status-dot{ display:inline-block; width:8px; height:8px; border-radius:2px; flex-shrink:0; vertical-align:middle; }
-.status-dot.locked{ background:var(--gold); }
-.status-dot.open{ border:1px solid var(--ink-dim); background:transparent; }
+/* ---------- lock/open status indicator (icon-based: padlock, not a bare dot) ---------- */
+.lock-indicator{ display:inline-flex; align-items:center; }
+.lock-indicator.locked{ color:var(--gold); }
+.lock-indicator.open{ color:var(--ink-dim); opacity:.7; }
 
-/* ---------- undo-investment button ---------- */
-.btn-undo{ background:transparent; border:1px solid var(--line); color:var(--ink-dim); font-size:10.5px; padding:5px 8px; border-radius:6px; cursor:pointer; margin-left:6px; white-space:nowrap; }
-.btn-undo:hover:not(:disabled){ color:var(--red); border-color:var(--red); }
-.btn-undo:disabled{ opacity:.28; cursor:not-allowed; }
+/* ---------- undo-investment button (made deliberately hard to miss - point 4) ---------- */
+.btn-undo{
+  display:inline-flex; align-items:center; gap:4px;
+  background:rgba(240,180,41,0.10); border:1px solid rgba(240,180,41,0.5);
+  color:var(--gold); font-size:12px; font-weight:600; padding:6px 10px;
+  border-radius:7px; cursor:pointer; white-space:nowrap; margin-left:0;
+}
+.btn-undo:hover:not(:disabled){ background:rgba(240,180,41,0.22); }
+.btn-undo:disabled{ opacity:.32; cursor:not-allowed; background:transparent; border-color:var(--line); color:var(--ink-dim); }
+.upgrade-actions{ display:flex; align-items:center; gap:6px; }
+.btn-icon{ display:inline-flex; align-items:center; gap:5px; }
 
 /* ---------- real-time value-change emphasis (ticker) ---------- */
 .ticker-card .sub{ font-size:11px; color:var(--ink-dim); margin-top:-3px; margin-bottom:3px; }
@@ -315,3 +322,143 @@ h3 .info-tip{ text-transform:none; letter-spacing:0; }
 .team-select-card.selected{ border-color:var(--gold); background:rgba(240,180,41,0.06); }
 .team-select-card.full{ opacity:0.45; cursor:not-allowed; }
 .team-select-card .row-1{ display:flex; align-items:center; gap:8px; }
+
+/* ---------- icon system (professional icons in place of emoji - point 1) ---------- */
+.icon{ width:1em; height:1em; display:inline-block; vertical-align:-0.15em; flex-shrink:0; }
+.icon-lg{ width:1.7em; height:1.7em; vertical-align:-0.3em; }
+.round-header .label{ display:flex; align-items:center; gap:5px; }
+.round-header .label .icon{ width:12px; height:12px; }
+
+/* ---------- negotiation channel tabs (Team / All Teams - point 3) ---------- */
+.channel-tabs{ display:flex; gap:6px; margin:0 0 10px; }
+.channel-tab{
+  flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+  font-family:var(--body); font-weight:600; font-size:12.5px; padding:8px 10px;
+  border-radius:8px; border:1px solid var(--line); background:var(--panel-2);
+  color:var(--ink-dim); cursor:pointer;
+}
+.channel-tab:hover{ color:var(--ink); }
+.channel-tab.active{ background:rgba(240,180,41,0.14); border-color:var(--gold); color:var(--gold); }
+.channel-hint{ font-size:11.5px; color:var(--ink-dim); margin-top:8px; display:flex; align-items:center; gap:5px; line-height:1.4; }
+
+/* ---------- chat: system/activity rows ("kill feed" - point 2) vs human chat ---------- */
+.chat-msg.system{ display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); padding:2px 0; }
+.chat-msg.system .act-icon{ flex-shrink:0; }
+.chat-msg.system b{ color:var(--ink); font-weight:600; }
+.chat-msg.system.act-lock .act-icon{ color:var(--gold); }
+.chat-msg.system.act-tech_up .act-icon, .chat-msg.system.act-capacity_up .act-icon{ color:var(--green); }
+.chat-msg.system.act-tech_down .act-icon, .chat-msg.system.act-capacity_down .act-icon{ color:var(--ink-dim); }
+
+/* ---------- shock category tag icon ---------- */
+.category-tag{ display:inline-flex; align-items:center; gap:5px; }
+
+/* ---------- leader crown + round-winner star ---------- */
+.crown-badge{ color:var(--gold); margin-left:5px; display:inline-flex; }
+.celebration-banner .star-icon{ color:var(--gold); margin-right:6px; }
+.leaderboard-row.first .rank{ display:flex; align-items:center; gap:4px; }
+
+/* ---------- confirm modal icon ---------- */
+.confirm-icon{ display:flex; justify-content:center; color:var(--red); margin-bottom:8px; }
+.confirm-icon .icon{ width:1.9em; height:1.9em; }
+.confirm-box.neutral .confirm-icon{ color:var(--gold); }
+
+/* ---------- "just happened" ping on the ticker (lock-in - point 2) ---------- */
+@keyframes lockPulse{ 0%{ box-shadow:0 0 0 0 rgba(240,180,41,0.55); } 70%{ box-shadow:0 0 0 9px rgba(240,180,41,0); } 100%{ box-shadow:0 0 0 0 rgba(240,180,41,0); } }
+.ticker-card.lock-flash{ animation: lockPulse .8s ease-out; }
+
+/* ---------- host live table: same lock ping, row-scoped ---------- */
+@keyframes rowFlash{ 0%{ background:rgba(240,180,41,0.22); } 100%{ background:transparent; } }
+tr.lock-flash{ animation: rowFlash .8s ease-out; }
+
+/* ---------- juice: physical feedback for actions (points 1-2 of the "game feel" pass) ---------- */
+@keyframes juiceSquish{ 0%{ transform:scale(1); } 40%{ transform:scale(0.93); } 100%{ transform:scale(1); } }
+.juice-squish{ animation: juiceSquish .22s ease-out; }
+@keyframes juiceShake{ 0%,100%{ transform:translateX(0); } 20%{ transform:translateX(-4px); } 40%{ transform:translateX(4px); } 60%{ transform:translateX(-3px); } 80%{ transform:translateX(3px); } }
+.juice-shake{ animation: juiceShake .35s ease-in-out; }
+@keyframes juiceLevelUp{ 0%{ box-shadow:0 0 0 0 rgba(240,180,41,0.7); background:rgba(240,180,41,0.35); } 100%{ box-shadow:0 0 0 14px rgba(240,180,41,0); background:transparent; } }
+.juice-levelup{ animation: juiceLevelUp .6s ease-out; border-radius:6px; }
+@keyframes juiceParticle{ 0%{ transform:translate(-50%,-50%) scale(1); opacity:1; } 100%{ transform:translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.3); opacity:0; } }
+.juice-particle{ position:fixed; width:6px; height:6px; border-radius:50%; pointer-events:none; z-index:9999; animation: juiceParticle .6s ease-out forwards; }
+
+/* ---------- sound mute toggle (fixed, visible on every screen) ---------- */
+.sound-toggle{
+  position:fixed; top:16px; right:16px; z-index:45;
+  display:flex; align-items:center; justify-content:center;
+  width:36px; height:36px; border-radius:50%;
+  background:var(--panel-2); border:1px solid var(--line); color:var(--ink-dim);
+  cursor:pointer;
+}
+.sound-toggle:hover{ color:var(--ink); border-color:var(--ink-dim); }
+.sound-toggle .icon{ width:16px; height:16px; }
+.sound-toggle.muted{ color:var(--red); border-color:rgba(226,75,74,0.4); }
+
+/* ================= BROADCAST (shared/projector) SCREEN ================= */
+/* Read-only, dark, oversized-for-distance viewing - a separate mini-app
+   from index.html/host.html on purpose (see broadcast.html/broadcast.js) so
+   its layout can be a single full-height stage instead of a scrolling page. */
+.bc-body{ height:100vh; overflow:hidden; }
+.bc-screen{ display:none; height:100vh; }
+.bc-screen.active{ display:flex; flex-direction:column; }
+#bc-entry.active, #bc-closed.active{ align-items:center; justify-content:center; }
+
+.bc-entry-card{
+  background:var(--panel); border:1px solid var(--line); border-radius:16px;
+  padding:40px 44px; text-align:center; max-width:420px; width:100%;
+}
+.bc-entry-card h1{ font-family:var(--display); font-size:28px; margin:8px 0 6px; }
+.bc-entry-sub{ color:var(--ink-dim); font-size:13.5px; margin:0 0 22px; line-height:1.5; }
+.bc-room-input{
+  width:100%; text-align:center; font-family:var(--mono); font-size:22px; letter-spacing:.18em;
+  text-transform:uppercase; padding:14px; border-radius:10px; border:1px solid var(--line);
+  background:var(--panel-2); color:var(--ink); margin-bottom:14px;
+}
+.bc-entry-error{ color:var(--red); font-size:13px; min-height:18px; margin:12px 0 0; }
+
+.bc-header{
+  display:flex; align-items:center; padding:20px 36px; flex-shrink:0;
+  border-bottom:1px solid var(--line); background:rgba(10,14,20,0.6);
+}
+.bc-header-block{ flex:1; }
+.bc-header-block + .bc-header-block{ border-left:1px solid var(--line-soft); padding-left:28px; margin-left:28px; }
+.bc-label{
+  font-family:var(--mono); font-size:12px; color:var(--ink-dim); text-transform:uppercase;
+  letter-spacing:.1em; display:flex; align-items:center; gap:6px; margin-bottom:4px;
+}
+.bc-label .icon{ width:13px; height:13px; }
+.bc-value{ font-family:var(--display); font-size:30px; font-weight:700; }
+.bc-timer{ color:var(--gold); }
+.bc-timer.low{ color:var(--red); }
+
+#bc-stage{ flex:1; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+#bc-stage canvas{ display:block; }
+
+.bc-shock-banner{
+  display:none; align-items:center; gap:16px; padding:12px 36px;
+  border-bottom:1px solid var(--line); background:rgba(240,180,41,0.06); flex-shrink:0;
+}
+.bc-shock-banner.active{ display:flex; }
+.bc-shock-tag{
+  font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--gold);
+  border:1px solid rgba(240,180,41,0.4); border-radius:6px; padding:5px 10px;
+  display:flex; align-items:center; gap:6px; flex-shrink:0; white-space:nowrap;
+}
+.bc-shock-tag .icon{ width:13px; height:13px; }
+.bc-shock-title{ font-family:var(--display); font-size:17px; font-weight:700; flex-shrink:0; }
+.bc-shock-desc{ color:var(--ink-dim); font-size:14px; }
+
+.bc-results-overlay{
+  display:none; position:absolute; inset:0; background:rgba(5,7,12,0.92);
+  flex-direction:column; align-items:center; justify-content:center; padding:40px;
+}
+.bc-results-overlay.active{ display:flex; }
+.bc-results-overlay h2{ font-family:var(--display); font-size:32px; margin:6px 0 24px; }
+.bc-results-table{ width:100%; max-width:720px; }
+.bc-results-row{
+  display:flex; align-items:center; gap:16px; padding:12px 20px; border-radius:10px;
+  background:var(--panel-2); margin-bottom:8px; font-family:var(--mono); font-size:15px;
+}
+.bc-results-row .rank{ width:28px; font-family:var(--display); font-weight:700; color:var(--ink-dim); }
+.bc-results-row.first{ border:1px solid var(--gold); background:rgba(240,180,41,0.08); }
+.bc-results-row.first .rank{ color:var(--gold); }
+.bc-results-row .name{ flex:1; font-family:var(--display); font-weight:700; }
+.bc-results-hint{ color:var(--ink-dim); font-size:13px; margin-top:20px; }

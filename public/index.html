@@ -8,8 +8,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/js/icons.js"></script>
+<script src="/js/sound.js"></script>
+<script src="/js/juice.js"></script>
 </head>
 <body>
+
+<button class="sound-toggle" id="btn-sound-toggle" type="button" aria-label="Toggle sound"><span class="icon-slot" data-icon="volume"></span></button>
 
 <!-- ============ SCREEN: JOIN ============ -->
 <section id="screen-join" class="screen active">
@@ -123,19 +128,19 @@
         <div class="value"><span id="hdr-round">1</span> / <span id="hdr-total-rounds">6</span></div>
       </div>
       <div class="block">
-        <div class="label">Time remaining</div>
+        <div class="label"><span class="icon-slot" data-icon="clock"></span>Time remaining</div>
         <div class="timer" id="hdr-timer">3:00</div>
       </div>
       <div class="block">
-        <div class="label">Market price (MP)</div>
+        <div class="label"><span class="icon-slot" data-icon="dollar"></span>Market price (MP)</div>
         <div class="value">$<span id="hdr-mp">—</span></div>
       </div>
       <div class="block">
-        <div class="label stat-tip">Apple demand <span class="info-tip" data-tip="Apple only buys this many chips total this round, split across every team. Highest-scoring sellers get filled first — the rest can sell zero.">i</span></div>
+        <div class="label stat-tip"><span class="icon-slot" data-icon="package"></span>Apple demand <span class="info-tip" data-tip="Apple only buys this many chips total this round, split across every team. Highest-scoring sellers get filled first — the rest can sell zero.">i</span></div>
         <div class="value" id="hdr-demand" style="font-size:16px;">—</div>
       </div>
       <div class="block" style="text-align:right;">
-        <div class="label">My team</div>
+        <div class="label" style="justify-content:flex-end;"><span class="icon-slot" data-icon="users"></span>My team</div>
         <div class="value" id="hdr-me" style="font-size:16px;">—</div>
       </div>
     </div>
@@ -155,18 +160,22 @@
     <div class="game-grid">
       <div>
         <div class="card">
-          <h3>Investment <span class="info-tip" data-tip="Both are optional and permanent once you Lock In. You can Undo a purchase from this round any time before then. Each upgrade costs 1.5x more than the last.">i</span></h3>
+          <h3><span class="icon-slot" data-icon="cpu"></span> Investment <span class="info-tip" data-tip="Both are optional and permanent once you Lock In. You can Undo a purchase from this round any time before then. Each upgrade costs 1.5x more than the last.">i</span></h3>
           <div class="upgrade-row">
             <div class="levels" id="tech-dots"></div>
-            <div class="name"><b>Technology <span class="info-tip" data-tip="Raises your Competitive Score immediately — helps you rank higher this round.">i</span></b><span>Lv <span id="tech-level">0</span>/5 · $<span id="tech-cost">2,000</span></span></div>
-            <button class="btn btn-sm" id="btn-buy-tech">Buy</button>
-            <button class="btn-undo" id="btn-undo-tech" title="Undo this round's Tech purchases">Undo</button>
+            <div class="name"><b><span class="icon-slot" data-icon="cpu"></span> Technology <span class="info-tip" data-tip="Raises your Competitive Score immediately — helps you rank higher this round.">i</span></b><span>Lv <span id="tech-level">0</span>/5 · $<span id="tech-cost">2,000</span></span></div>
+            <div class="upgrade-actions">
+              <button class="btn btn-sm btn-icon" id="btn-buy-tech"><span class="icon-slot" data-icon="plus"></span><span id="btn-buy-tech-label">Buy</span></button>
+              <button class="btn-undo" id="btn-undo-tech" title="Undo this round's Tech purchases"><span class="icon-slot" data-icon="undo"></span>Undo</button>
+            </div>
           </div>
           <div class="upgrade-row">
             <div class="levels" id="cap-dots"></div>
-            <div class="name"><b>Capacity <span class="info-tip" data-tip="Produces more chips starting NEXT round — no effect on this round's inventory.">i</span></b><span>Lv <span id="cap-level">0</span>/5 · $<span id="cap-cost">1,500</span></span></div>
-            <button class="btn btn-sm" id="btn-buy-cap">Buy</button>
-            <button class="btn-undo" id="btn-undo-cap" title="Undo this round's Capacity purchases">Undo</button>
+            <div class="name"><b><span class="icon-slot" data-icon="layers"></span> Capacity <span class="info-tip" data-tip="Produces more chips starting NEXT round — no effect on this round's inventory.">i</span></b><span>Lv <span id="cap-level">0</span>/5 · $<span id="cap-cost">1,500</span></span></div>
+            <div class="upgrade-actions">
+              <button class="btn btn-sm btn-icon" id="btn-buy-cap"><span class="icon-slot" data-icon="plus"></span><span id="btn-buy-cap-label">Buy</span></button>
+              <button class="btn-undo" id="btn-undo-cap" title="Undo this round's Capacity purchases"><span class="icon-slot" data-icon="undo"></span>Undo</button>
+            </div>
           </div>
         </div>
 
@@ -197,12 +206,18 @@
 
       <div>
         <div class="card">
-          <h3>Negotiation channel</h3>
-          <div class="chat-log" id="chat-log"></div>
+          <h3>Negotiation</h3>
+          <div class="channel-tabs">
+            <button class="channel-tab active" id="tab-team" data-channel="team" type="button"><span class="icon-slot" data-icon="users"></span>Team</button>
+            <button class="channel-tab" id="tab-global" data-channel="global" type="button"><span class="icon-slot" data-icon="grid"></span>All Teams</button>
+          </div>
+          <div class="chat-log" id="chat-log-team"></div>
+          <div class="chat-log" id="chat-log-global" style="display:none;"></div>
           <div class="chat-row">
             <input id="chat-input" maxlength="240" placeholder="Talk, threaten, promise, bluff…">
-            <button class="btn btn-sm" id="btn-chat-send">Send</button>
+            <button class="btn btn-sm btn-icon" id="btn-chat-send"><span class="icon-slot" data-icon="send"></span>Send</button>
           </div>
+          <div class="channel-hint" id="channel-hint"></div>
         </div>
       </div>
     </div>
@@ -279,7 +294,7 @@
     </div>
     <div class="howto-step">
       <div class="num">2</div>
-      <div class="txt"><b>Set your price &amp; quantity</b><p>Choose how much to charge and how many chips to offer. Everyone's numbers update live, so you can watch your rivals and react. A colored badge shows your predicted rank in real time.</p></div>
+      <div class="txt"><b>Set your price &amp; quantity</b><p>Choose how much to charge and how many chips to offer. Everyone's numbers update live, so you can watch your rivals and react. A colored badge shows your predicted rank in real time. Use the <b style="color:var(--ink)">Team</b> channel to plan privately, or <b style="color:var(--ink)">All Teams</b> to talk with rivals — only each team's leader can post there, but everyone can read along.</p></div>
     </div>
     <div class="howto-step">
       <div class="num">3</div>
@@ -298,6 +313,7 @@
 <div class="modal-overlay" id="confirm-modal">
   <div class="modal-box confirm-box" id="confirm-box">
     <div class="confirm-bar"></div>
+    <div class="confirm-icon"><span class="icon-slot" data-icon="alertTriangle"></span></div>
     <h2 id="confirm-title">Are you sure?</h2>
     <p id="confirm-message">This action cannot be undone.</p>
     <div class="confirm-actions">
@@ -311,7 +327,7 @@
   <div id="money-rain"></div>
   <div class="celebration-banner">
     <p class="eyebrow">round leader</p>
-    <h2 id="celebration-title">Your team led this round</h2>
+    <h2 id="celebration-title"><span class="icon-slot star-icon" data-icon="star"></span>Your team led this round</h2>
     <p id="celebration-sub">$0 revenue</p>
   </div>
 </div>
