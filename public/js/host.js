@@ -81,7 +81,7 @@
   // ---------- market shock (host sees numeric effects too) ----------
   function showShockLoading() {
     $('shock-loading').style.display = 'flex';
-    $('shock-banner').style.display = 'none';
+    $('shock-banner').classList.remove('active');
   }
   function summarizeEffects(effects) {
     if (!effects) return '';
@@ -100,10 +100,10 @@
     $('shock-loading').style.display = 'none';
     const el = $('shock-banner');
     if (!shock) {
-      el.style.display = 'none';
+      el.classList.remove('active');
       return;
     }
-    el.style.display = 'flex';
+    el.classList.add('active');
     const tag = shock.categoryTag || 'MARKET';
     $('shock-tag').innerHTML = Icons[CATEGORY_ICON[tag] || 'trending'] + tag;
     $('shock-title').textContent = shock.title;

@@ -772,6 +772,10 @@ io.on('connection', (socket) => {
       broadcastLobby(room);
       broadcastState(room);
       sendChatSync(socket.id, room, team);
+      // Round-by-round history for the live price chart/watchlist sparklines
+      // - without this, a reconnect mid-match would show a chart with a gap
+      // for every round that happened before the reconnect.
+      io.to(socket.id).emit('HISTORY_SYNC', { history: room.history });
       // Catch up a (re)joining client on whatever already happened - without
       // this, reconnecting mid/after a round showed an empty results/game-
       // over screen, since those only ever populate from their one-shot

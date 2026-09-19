@@ -146,16 +146,34 @@
     </div>
 
     <div id="shock-loading" class="shock-loading" style="display:none;"><span class="spin"></span> Deciding this round's market shock…</div>
-    <div id="shock-banner" class="shock-banner" style="display:none;">
+    <div id="shock-banner" class="news-strip">
       <div class="category-tag" id="shock-tag">MARKET</div>
-      <div>
-        <div class="title" id="shock-title">—</div>
-        <div class="desc" id="shock-desc">—</div>
-        <div class="impact" id="shock-impact">—</div>
-      </div>
+      <div class="title" id="shock-title">—</div>
+      <div class="desc" id="shock-desc">—</div>
+      <div class="impact" id="shock-impact">—</div>
     </div>
 
-    <div class="ticker" id="ticker"></div>
+    <div class="card chart-panel">
+      <div class="chart-panel-head">
+        <h3><span class="icon-slot" data-icon="trending"></span> Live price chart</h3>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div class="chart-legend" id="chart-legend"></div>
+          <div class="chart-live-badge"><span class="dot"></span>Live</div>
+        </div>
+      </div>
+      <div class="chart-panel-canvas-wrap"><canvas id="live-chart"></canvas></div>
+    </div>
+
+    <div class="card watchlist-card">
+      <div class="watchlist-scroll">
+        <div class="watchlist-cols">
+          <div class="watchlist-head">
+            <div>Symbol</div><div>Price</div><div>Chg</div><div>Qty</div><div>T · C</div><div>Trend</div><div></div>
+          </div>
+          <div id="ticker" class="contents-slot"></div>
+        </div>
+      </div>
+    </div>
 
     <div class="game-grid">
       <div>
@@ -232,13 +250,11 @@
     <p class="eyebrow">round results</p>
     <h1>Round <span id="res-round">1</span> is in the books</h1>
     <p>New Market Price: $<b id="res-mp" style="color:var(--ink)">—</b></p>
-    <div class="shock-banner" id="res-shock-banner" style="display:none;">
+    <div class="news-strip" id="res-shock-banner">
       <div class="category-tag" id="res-shock-tag">MARKET</div>
-      <div>
-        <div class="title" id="res-shock-title">—</div>
-        <div class="desc" id="res-shock-desc">This round's market shock.</div>
-        <div class="impact" id="res-shock-impact">—</div>
-      </div>
+      <div class="title" id="res-shock-title">—</div>
+      <div class="desc" id="res-shock-desc">This round's market shock.</div>
+      <div class="impact" id="res-shock-impact">—</div>
     </div>
     <p class="inline-hint">Apple bought from the highest-scoring sellers first (best mix of low price + high tech + high capacity) until it ran out of demand for the round. Anything unsold rolls over to next round.</p>
     <div class="card" style="margin-top:18px; overflow-x:auto;">

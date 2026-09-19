@@ -18,6 +18,7 @@
   let priceTimer = null;
   let lastHistory = [];
   let charts = {};
+  let liveChart = null; // the in-game real-time price chart (separate from the post-match summary charts)
   let confirmCallback = null;
   let activeChannel = 'team'; // 'team' | 'global' - which negotiation channel tab is showing
   let amILeader = false; // this device's current post permission in the All-Teams channel
@@ -320,10 +321,10 @@
     $('shock-loading').style.display = 'none';
     const el = $('shock-banner');
     if (!shock) {
-      el.style.display = 'none';
+      el.classList.remove('active');
       return;
     }
-    el.style.display = 'flex';
+    el.classList.add('active');
     const tag = shock.categoryTag || 'MARKET';
     $('shock-tag').innerHTML = Icons[CATEGORY_ICON[tag] || 'trending'] + tag;
     $('shock-title').textContent = shock.title + (shock.source === 'ai' ? '' : '');
@@ -344,6 +345,78 @@
   }
 
   // ---------- ticker ----------
+  // ---------- live price chart (real-time centerpiece) ----------
+  function renderChartLegend(teams) {
+    $('chart-legend').innerHTML = teams
+      .map((t) => '<span class="item"><span class="dot" style="background:' + colorFor(t.teamId) + '"></span>' + escapeHtml(t.teamName) + '</span>')
+      .join('');
+  }
+  function ensureLiveChart() {
+    const canvas = $('live-chart');
+    if (!canvas || typeof Chart === 'undefined') return null;
+    if (liveChart) return liveChart;
+    liveChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: [], datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 260 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#7d8798' }, grid: { color: '#212a3a' } },
+          y: { ticks: { color: '#7d8798', callback: (v) => '$' + v }, grid: { color: '#212a3a' } }
+        }
+      }
+    });
+    return liveChart;
+  }
+  // Draws completed rounds (from lastHistory, accumulated as each
+  // ROUND_RESULT arrives) as the solid line, plus one live trailing point
+  // per team from the CURRENT round's not-yet-locked price - only while a
+  // round is actually active, so results/lobby screens don't show a
+  // premature extra point.
+  function updateLiveChart(teams, phase) {
+    const chart = ensureLiveChart();
+    if (!chart) return;
+    const teamIds = teams.map((t) => t.teamId);
+    const existingIds = chart.data.datasets.map((d) => d._teamId);
+    const rosterChanged = teamIds.length !== existingIds.length || teamIds.some((id, i) => id !== existingIds[i]);
+    if (rosterChanged) {
+      chart.data.datasets = teams.map((t) => ({
+        _teamId: t.teamId,
+        label: t.teamName,
+        data: [],
+        borderColor: colorFor(t.teamId),
+        backgroundColor: colorFor(t.teamId),
+        tension: 0.3,
+        pointRadius: 2,
+        borderWidth: 2,
+        spanGaps: true
+      }));
+      renderChartLegend(teams);
+    }
+
+    const showLive = phase === 'round_active';
+    const labels = lastHistory.map((h) => 'R' + h.round);
+    if (showLive) labels.push('R' + (lastHistory.length + 1));
+    chart.data.labels = labels;
+
+    chart.data.datasets.forEach((ds) => {
+      const points = lastHistory.map((h) => {
+        const r = h.results.find((x) => x.teamId === ds._teamId);
+        return r ? r.price : null;
+      });
+      if (showLive) {
+        const live = teams.find((t) => t.teamId === ds._teamId);
+        points.push(live ? live.price : null);
+      }
+      ds.data = points;
+    });
+    chart.update('none');
+  }
+
   function valueHtml(id, value, lastMap) {
     const prev = lastMap[id];
     let cls = '';
@@ -355,6 +428,26 @@
     }
     lastMap[id] = value;
     return '<span class="flash-value' + cls + '">' + value + '</span>' + arrow;
+  }
+  // % change vs. that team's price in the last COMPLETED round - lastHistory
+  // is appended to as each ROUND_RESULT arrives (see the socket handler),
+  // so this is real "since last close" math, the same shape a real ticker uses.
+  function changePctFor(teamId, currentPrice) {
+    if (!lastHistory.length) return null;
+    const prevResult = lastHistory[lastHistory.length - 1].results.find((r) => r.teamId === teamId);
+    if (!prevResult || !prevResult.price) return null;
+    return ((currentPrice - prevResult.price) / prevResult.price) * 100;
+  }
+  // A minimal inline trend line - last few rounds' price plus this round's
+  // live price, no charting library needed for something this small.
+  function sparklineSvg(points, color) {
+    if (!points || points.length < 2) return '<svg class="spark" viewBox="0 0 60 24" width="60" height="24"></svg>';
+    const min = Math.min.apply(null, points);
+    const max = Math.max.apply(null, points);
+    const range = max - min || 1;
+    const step = 60 / (points.length - 1);
+    const coords = points.map((v, i) => i * step + ',' + (22 - ((v - min) / range) * 20)).join(' ');
+    return '<svg class="spark" viewBox="0 0 60 24" width="60" height="24"><polyline points="' + coords + '" fill="none" stroke="' + color + '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   }
   function renderTicker(teams) {
     const el = $('ticker');
@@ -371,16 +464,41 @@
       // true only, so it fires once, not on every re-render while locked).
       const justLocked = lastLockByTeam[t.teamId] === false && t.locked === true;
       lastLockByTeam[t.teamId] = t.locked;
-      const card = document.createElement('div');
-      card.className = 'ticker-card' + (changed ? ' flash' : '') + (justLocked ? ' lock-flash' : '') + (!t.connected && !t.isBot ? ' offline' : '');
-      card.style.setProperty('border-left', '3px solid ' + colorFor(t.teamId));
-      card.innerHTML =
-        '<div class="co">' + escapeHtml(t.teamName) + (t.teamId === myTeamId ? ' <span class="pill" style="margin-left:6px; padding:2px 7px;">You</span>' : '') +
-        '<span class="lock"><span class="lock-indicator ' + (t.locked ? 'locked' : 'open') + '" title="' + (t.locked ? 'Locked' : 'Not locked yet') + '">' + (t.locked ? Icons.lock : Icons.unlock) + '</span></span></div>' +
-        '<div class="row"><span>Price</span><b>$' + priceHtml + '</b></div>' +
-        '<div class="row"><span>Qty</span><b>' + qtyHtml + '</b></div>' +
-        '<div class="row"><span>Tech / Cap</span><b>Lv' + techHtml + ' / Lv' + capHtml + '</b></div>';
-      el.appendChild(card);
+
+      const chgPct = changePctFor(t.teamId, t.price);
+      let chgCls = 'chg-flat',
+        chgText = '—';
+      if (chgPct != null) {
+        if (chgPct > 0.05) {
+          chgCls = 'chg-up';
+          chgText = '▲ +' + chgPct.toFixed(1) + '%';
+        } else if (chgPct < -0.05) {
+          chgCls = 'chg-down';
+          chgText = '▼ ' + chgPct.toFixed(1) + '%';
+        } else {
+          chgText = '0.0%';
+        }
+      }
+
+      const teamPoints = lastHistory
+        .map((h) => h.results.find((r) => r.teamId === t.teamId))
+        .filter(Boolean)
+        .map((r) => r.price);
+      teamPoints.push(t.price);
+      const spark = sparklineSvg(teamPoints.slice(-8), colorFor(t.teamId));
+
+      const row = document.createElement('div');
+      row.className = 'watchlist-row' + (changed ? ' flash' : '') + (justLocked ? ' lock-flash' : '') + (!t.connected && !t.isBot ? ' offline' : '');
+      row.innerHTML =
+        '<div class="sym"><span class="sym-dot" style="background:' + colorFor(t.teamId) + '"></span>' + escapeHtml(t.teamName) +
+        (t.teamId === myTeamId ? ' <span class="pill" style="margin-left:4px; padding:1px 6px; font-size:10px;">You</span>' : '') + '</div>' +
+        '<div>$' + priceHtml + '</div>' +
+        '<div><span class="chg ' + chgCls + '">' + chgText + '</span></div>' +
+        '<div>' + qtyHtml + '</div>' +
+        '<div>' + techHtml + '·' + capHtml + '</div>' +
+        '<div>' + spark + '</div>' +
+        '<div class="lock-cell"><span class="lock-indicator ' + (t.locked ? 'locked' : 'open') + '" title="' + (t.locked ? 'Locked' : 'Not locked yet') + '">' + (t.locked ? Icons.lock : Icons.unlock) + '</span></div>';
+      el.appendChild(row);
     });
   }
 
@@ -410,6 +528,7 @@
     renderShock(payload.shock);
 
     renderTicker(payload.teams);
+    updateLiveChart(payload.teams, payload.phase);
 
     const me = payload.teams.find((t) => t.teamId === myTeamId);
     if (!me) return;
@@ -512,14 +631,14 @@
     $('res-mp').textContent = payload.marketPrice.toFixed(0);
     const shockEl = $('res-shock-banner');
     if (payload.shock) {
-      shockEl.style.display = 'flex';
+      shockEl.classList.add('active');
       const tag = payload.shock.categoryTag || 'MARKET';
       $('res-shock-tag').innerHTML = Icons[CATEGORY_ICON[tag] || 'trending'] + tag;
       $('res-shock-title').textContent = payload.shock.title;
       $('res-shock-desc').textContent = payload.shock.description;
       $('res-shock-impact').textContent = payload.shock.impact || 'No numeric change this round.';
     } else {
-      shockEl.style.display = 'none';
+      shockEl.classList.remove('active');
     }
     const body = $('res-table-body');
     body.innerHTML = '';
@@ -770,8 +889,20 @@
     switchChannel(btn.dataset.channel);
   }));
 
+  socket.on('HISTORY_SYNC', ({ history }) => {
+    lastHistory = history || [];
+  });
   socket.on('LOBBY_UPDATE', (payload) => {
     if (!myTeamId || !payload.teams.some((t) => t.teamId === myTeamId)) return;
+    if (payload.phase === 'lobby') {
+      // Fresh join or a "play again" reset - either way the live chart and
+      // watchlist sparklines/%-change must not carry over a previous match's data.
+      lastHistory = [];
+      if (liveChart) {
+        liveChart.destroy();
+        liveChart = null;
+      }
+    }
     renderLobby(payload);
     routeScreen(payload.phase);
   });
@@ -795,6 +926,7 @@
   });
   socket.on('TIMER_TICK', ({ timeLeft }) => updateTimer(timeLeft));
   socket.on('ROUND_RESULT', (payload) => {
+    lastHistory.push(payload); // accumulate live, round by round - see updateLiveChart/changePctFor
     renderResults(payload);
     routeScreen('round_results');
   });

@@ -76,27 +76,49 @@ p{ color: var(--ink-dim); line-height:1.6; margin: 8px 0 0; font-size: 14px; }
 .pill{ display:inline-flex; align-items:center; gap:6px; font-family: var(--mono); font-size: 11.5px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-dim); }
 .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
 
-/* ---------- ticker (signature element) ---------- */
-.ticker{
-  display:flex; gap: 10px; overflow-x:auto; padding: 4px 2px 14px; margin-bottom: 4px;
-  scrollbar-width: thin;
+/* ---------- watchlist (replaces the card-grid ticker - the "other symbols" table) ---------- */
+.watchlist-card{ padding:0; overflow:hidden; margin-bottom:18px; }
+.watchlist-scroll{ overflow-x:auto; }
+.contents-slot{ display:contents; }
+.watchlist-cols{ display:grid; grid-template-columns: 1.7fr 0.9fr 0.9fr 0.7fr 0.9fr 1fr 0.5fr; align-items:center; min-width:680px; }
+.watchlist-head{ display:contents; }
+.watchlist-head > div{
+  font-family: var(--mono); font-size: 10px; color: var(--ink-dim); text-transform:uppercase; letter-spacing:.08em;
+  font-weight:600; padding:11px 12px; border-bottom:1px solid var(--line); text-align:right;
 }
-.ticker-card{
-  flex: 0 0 auto; min-width: 168px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 12px; padding: 10px 12px; position: relative; overflow:hidden;
-}
-.ticker-card::before{
-  content:''; position:absolute; left:0; top:0; bottom:0; width: 3px;
-}
-.ticker-card .co{ font-family: var(--display); font-weight: 700; font-size: 13.5px; display:flex; align-items:center; gap:6px; }
-.ticker-card .co .lock{ margin-left:auto; font-size: 11px; opacity: .85; }
-.ticker-card .row{ display:flex; justify-content:space-between; font-family: var(--mono); font-size: 12px; color: var(--ink-dim); margin-top: 5px; }
-.ticker-card .row b{ color: var(--ink); font-weight: 600; }
-.ticker-card.flash{ animation: flashcard .5s ease; }
-.ticker-card.offline{ opacity:.45; }
-@keyframes flashcard{ 0%{ background: rgba(240,180,41,0.22); } 100%{ background: var(--panel); } }
+.watchlist-head > div:first-child{ text-align:left; }
+.watchlist-row{ display:contents; }
+.watchlist-row > div{ padding:10px 12px; font-family: var(--mono); font-size:13px; border-bottom:1px solid var(--line-soft); text-align:right; transition:background .2s; }
+.watchlist-row.offline > div{ opacity:.4; }
+.watchlist-row .sym{ display:flex; align-items:center; gap:8px; font-family: var(--display); font-weight:700; font-size:13px; text-align:left; }
+.watchlist-row .sym-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.watchlist-row .chg{ display:inline-flex; align-items:center; justify-content:flex-end; gap:3px; font-weight:600; width:100%; }
+.watchlist-row .chg .icon{ width:10px; height:10px; }
+.watchlist-row .chg-up{ color: var(--green); }
+.watchlist-row .chg-down{ color: var(--red); }
+.watchlist-row .chg-flat{ color: var(--ink-dim); }
+.watchlist-row .lock-cell{ display:flex; justify-content:flex-end; }
+.watchlist-row.flash > div{ animation: flashrow .5s ease; }
+@keyframes flashrow{ 0%{ background: rgba(240,180,41,0.16); } 100%{ background:transparent; } }
+.watchlist-row.lock-flash > div{ animation: lockRowPulse .8s ease-out; }
+@keyframes lockRowPulse{ 0%{ background: rgba(240,180,41,0.28); } 100%{ background:transparent; } }
 .flash-num{ animation: flashnum .5s ease; }
 @keyframes flashnum{ 0%{ color: var(--gold); } 100%{ color: inherit; } }
+
+/* ---------- live chart (real-time price panel - the new centerpiece) ---------- */
+.chart-panel{ margin-bottom:18px; }
+.chart-panel .chart-panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
+.chart-panel h3{ margin:0; }
+.chart-legend{ display:flex; gap:12px; flex-wrap:wrap; font-family: var(--mono); font-size:11px; color: var(--ink-dim); }
+.chart-legend .item{ display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.chart-legend .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.chart-panel-canvas-wrap{ position:relative; height:250px; }
+.chart-live-badge{
+  display:inline-flex; align-items:center; gap:5px; font-family: var(--mono); font-size:10px; font-weight:700;
+  letter-spacing:.06em; color: var(--red); text-transform:uppercase;
+}
+.chart-live-badge .dot{ width:6px; height:6px; border-radius:50%; background: var(--red); animation: liveBlink 1.4s ease infinite; }
+@keyframes liveBlink{ 0%,100%{ opacity:1; } 50%{ opacity:.25; } }
 
 /* ---------- round header ---------- */
 .round-header{
@@ -107,6 +129,7 @@ p{ color: var(--ink-dim); line-height:1.6; margin: 8px 0 0; font-size: 14px; }
 .round-header .block{ text-align:left; }
 .round-header .label{ font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim); text-transform:uppercase; letter-spacing:.08em; }
 .round-header .value{ font-family: var(--display); font-size: 22px; font-weight: 700; }
+.round-header .value .mp-chg{ font-family: var(--mono); font-size:12px; font-weight:600; margin-left:6px; }
 .timer{ font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: .02em; }
 .timer.warn{ color: var(--gold); }
 .timer.danger{ color: var(--red); animation: pulse 1s ease infinite; }
@@ -181,24 +204,23 @@ tr.winner td:first-child{ color: var(--gold); }
 /* ---------- inline plain-language hints ---------- */
 .inline-hint{ font-size:11.5px; color:var(--ink-dim); margin-top:3px; line-height:1.5; }
 
-/* ---------- market shock banner (made to stand out on purpose) ---------- */
-.shock-banner{
-  display:flex; align-items:flex-start; gap:14px; padding:16px 20px; border-radius:16px;
-  background: linear-gradient(135deg, rgba(139,124,246,0.20), rgba(139,124,246,0.05));
-  border:1.5px solid rgba(139,124,246,0.55); margin-bottom:14px;
-  animation: shockEntrance .45s cubic-bezier(.34,1.56,.64,1), shockGlow 2.6s ease-in-out infinite;
+/* ---------- market shock as a news-tape strip (was a boxy banner) ---------- */
+.news-strip{
+  display:none; align-items:center; gap:14px; padding:10px 16px; margin-bottom:14px;
+  border-radius:10px; background:rgba(139,124,246,0.08); border:1px solid rgba(139,124,246,0.28);
+  animation: newsSlideIn .4s ease;
 }
-@keyframes shockEntrance{ 0%{ transform:translateY(-12px) scale(0.96); opacity:0; } 100%{ transform:translateY(0) scale(1); opacity:1; } }
-@keyframes shockGlow{ 0%,100%{ box-shadow:0 0 0 0 rgba(139,124,246,0); } 50%{ box-shadow:0 0 26px 3px rgba(139,124,246,0.30); } }
-.shock-banner .category-tag{
+.news-strip.active{ display:flex; }
+@keyframes newsSlideIn{ 0%{ transform:translateY(-8px); opacity:0; } 100%{ transform:translateY(0); opacity:1; } }
+.news-strip .category-tag{
   flex-shrink:0; font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.06em;
   padding:5px 9px; border-radius:7px; background:rgba(139,124,246,0.22); color:#ddd4fd;
   border:1px solid rgba(139,124,246,0.45); white-space:nowrap;
 }
-.shock-banner .title{ font-family:var(--display); font-weight:700; font-size:16px; color:#ddd4fd; letter-spacing:.01em; }
-.shock-banner .desc{ font-size:13px; color:var(--ink-dim); margin-top:3px; line-height:1.5; }
-.shock-banner .impact{ display:inline-block; margin-top:8px; font-family:var(--mono); font-size:11px; padding:4px 10px; border-radius:999px; background:rgba(139,124,246,0.20); color:#c4b5fd; border:1px solid rgba(139,124,246,0.4); }
-.shock-banner .ai-tag{ font-family:var(--mono); font-size:9px; font-weight:700; letter-spacing:.06em; color:#c4b5fd; opacity:0.85; margin-left:7px; border:1px solid rgba(196,181,253,0.4); border-radius:5px; padding:2px 5px; vertical-align:middle; }
+.news-strip .title{ font-family:var(--display); font-weight:700; font-size:13.5px; color:#ddd4fd; flex-shrink:0; white-space:nowrap; }
+.news-strip .desc{ font-size:12.5px; color:var(--ink-dim); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.news-strip .impact{ flex-shrink:0; font-family:var(--mono); font-size:10.5px; padding:4px 9px; border-radius:999px; background:rgba(139,124,246,0.20); color:#c4b5fd; border:1px solid rgba(139,124,246,0.4); white-space:nowrap; }
+.news-strip .ai-tag{ font-family:var(--mono); font-size:9px; font-weight:700; letter-spacing:.06em; color:#c4b5fd; opacity:0.85; flex-shrink:0; border:1px solid rgba(196,181,253,0.4); border-radius:5px; padding:2px 5px; }
 .shock-loading{ display:flex; align-items:center; gap:8px; padding:10px 14px; border-radius:12px; background:var(--panel-2); border:1px solid var(--line); margin-bottom:14px; font-size:12.5px; color:var(--ink-dim); }
 .shock-loading .spin{ width:12px; height:12px; border-radius:50%; border:2px solid var(--line); border-top-color:#c4b5fd; animation:spin .7s linear infinite; }
 @keyframes spin{ to{ transform:rotate(360deg); } }
@@ -230,8 +252,7 @@ tr.winner td:first-child{ color: var(--gold); }
 .upgrade-actions{ display:flex; align-items:center; gap:6px; }
 .btn-icon{ display:inline-flex; align-items:center; gap:5px; }
 
-/* ---------- real-time value-change emphasis (ticker) ---------- */
-.ticker-card .sub{ font-size:11px; color:var(--ink-dim); margin-top:-3px; margin-bottom:3px; }
+/* ---------- real-time value-change emphasis (used inside watchlist rows) ---------- */
 .flash-value{ display:inline-block; }
 .flash-value.pop{ animation: valuePop .8s ease; }
 .flash-value.pop.up{ color:var(--green) !important; }
@@ -240,7 +261,6 @@ tr.winner td:first-child{ color: var(--gold); }
 .value-arrow{ font-size:10px; margin-left:2px; font-weight:700; }
 .value-arrow.up{ color:var(--green); }
 .value-arrow.down{ color:var(--red); }
-.ticker-card.flash{ box-shadow:0 0 0 1.5px var(--gold); }
 
 /* ---------- round-winner celebration (geometric, not emoji) ---------- */
 .celebration-overlay{ position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center; overflow:hidden; }
@@ -361,10 +381,6 @@ h3 .info-tip{ text-transform:none; letter-spacing:0; }
 .confirm-icon{ display:flex; justify-content:center; color:var(--red); margin-bottom:8px; }
 .confirm-icon .icon{ width:1.9em; height:1.9em; }
 .confirm-box.neutral .confirm-icon{ color:var(--gold); }
-
-/* ---------- "just happened" ping on the ticker (lock-in - point 2) ---------- */
-@keyframes lockPulse{ 0%{ box-shadow:0 0 0 0 rgba(240,180,41,0.55); } 70%{ box-shadow:0 0 0 9px rgba(240,180,41,0); } 100%{ box-shadow:0 0 0 0 rgba(240,180,41,0); } }
-.ticker-card.lock-flash{ animation: lockPulse .8s ease-out; }
 
 /* ---------- host live table: same lock ping, row-scoped ---------- */
 @keyframes rowFlash{ 0%{ background:rgba(240,180,41,0.22); } 100%{ background:transparent; } }
