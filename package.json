@@ -1,0 +1,18 @@
+{
+  "name": "chip-war-msg",
+  "version": "2.0.0",
+  "description": "Chip War (MSG v2.0) - real-time multiplayer economic strategy game prototype",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node _engine.test.js"
+  },
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
