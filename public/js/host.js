@@ -388,7 +388,7 @@
       }));
     const valueData = seriesFor((r) => r.capital + r.unsoldInventory * 10 + r.techLevel * 500 + r.capacityLevel * 500);
     const priceData = seriesFor((r) => r.price);
-    const mpData = [{ label: 'Market Price', data: history.map((h) => h.marketPrice), borderColor: '#a78bfa', backgroundColor: '#a78bfa', tension: 0.25 }];
+    const mpData = [{ label: 'Market Price', data: history.map((h) => h.marketPrice), borderColor: '#e8eaed', backgroundColor: '#e8eaed', tension: 0.25 }];
     if ($('chart-value')) charts.value = new Chart($('chart-value').getContext('2d'), { type: 'line', data: { labels, datasets: valueData }, options: chartOptions() });
     if ($('chart-price')) charts.price = new Chart($('chart-price').getContext('2d'), { type: 'line', data: { labels, datasets: priceData }, options: chartOptions() });
     if ($('chart-mp')) charts.mp = new Chart($('chart-mp').getContext('2d'), { type: 'line', data: { labels, datasets: mpData }, options: chartOptions() });

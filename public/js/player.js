@@ -437,14 +437,22 @@
   // immediately, and once a second via TIMER_TICK, so the line keeps flowing
   // even when nobody's mid-edit - that steady tick is what makes it read as
   // "live" rather than a chart that only moves when you personally touch it.
+  // A team mid-edit often passes through $0 while clearing the field to
+  // type a new number - that's not a real price, so don't let it spike the
+  // chart. Only a genuine LOCKED $0 (an intentional, committed decision)
+  // should ever show up as a $0 point.
+  let lastValidPriceByTeam = {};
   function sampleChartPoint(teams) {
     if (!teams || !teams.length) return;
     if (chartStartTime == null) chartStartTime = Date.now();
     const t = (Date.now() - chartStartTime) / 1000;
     teams.forEach((team) => {
       if (!chartSeries[team.teamId]) chartSeries[team.teamId] = [];
+      const isTransientZero = team.price === 0 && !team.locked;
+      const y = isTransientZero ? (lastValidPriceByTeam[team.teamId] != null ? lastValidPriceByTeam[team.teamId] : team.price) : team.price;
+      if (!isTransientZero) lastValidPriceByTeam[team.teamId] = team.price;
       const series = chartSeries[team.teamId];
-      series.push({ t, y: team.price });
+      series.push({ t, y });
       if (series.length > 600) series.shift(); // defensive cap; not expected to matter at this game's scale
     });
     lastTeamsSnapshot = teams;
@@ -454,6 +462,7 @@
     chartSeries = {};
     chartStartTime = null;
     lastTeamsSnapshot = null;
+    lastValidPriceByTeam = {};
     if (liveChart) {
       liveChart.destroy();
       liveChart = null;
@@ -768,7 +777,7 @@
 
     const valueData = seriesFor((r) => r.capital + r.unsoldInventory * 10 + r.techLevel * 500 + r.capacityLevel * 500);
     const priceData = seriesFor((r) => r.price);
-    const mpData = [{ label: 'Market Price', data: history.map((h) => h.marketPrice), borderColor: '#a78bfa', backgroundColor: '#a78bfa', tension: 0.25 }];
+    const mpData = [{ label: 'Market Price', data: history.map((h) => h.marketPrice), borderColor: '#e8eaed', backgroundColor: '#e8eaed', tension: 0.25 }];
 
     if ($('chart-value')) charts.value = new Chart($('chart-value').getContext('2d'), { type: 'line', data: { labels, datasets: valueData }, options: chartOptions() });
     if ($('chart-price')) charts.price = new Chart($('chart-price').getContext('2d'), { type: 'line', data: { labels, datasets: priceData }, options: chartOptions() });
