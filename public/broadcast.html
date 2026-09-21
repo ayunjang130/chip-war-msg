@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chip War — Broadcast</title>
 <link rel="stylesheet" href="/style.css">
-<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="/js/icons.js"></script>
 </head>
 <body class="bc-body">
@@ -45,7 +45,10 @@
     </div>
   </div>
 
-  <div id="bc-stage"></div>
+  <div class="bc-chart-panel">
+    <div class="bc-chart-legend" id="bc-chart-legend"></div>
+    <div class="bc-chart-wrap"><canvas id="bc-chart"></canvas></div>
+  </div>
 
   <div id="bc-shock-banner" class="bc-shock-banner">
     <div class="bc-shock-tag" id="bc-shock-tag"></div>
