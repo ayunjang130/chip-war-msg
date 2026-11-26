@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: chip-war
-    runtime: node
-    plan: free
-    buildCommand: npm install
-    startCommand: npm start
