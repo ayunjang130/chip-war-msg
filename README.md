@@ -7,6 +7,61 @@ and compete for Apple's purchase orders across 6 rounds.
 Stack: **Node.js + Express (static hosting) + Socket.io (real-time sync)**.
 State lives in server memory only — no database.
 
+## v2.1 — what changed in this release
+
+- **Projector view (`/broadcast`) rebuilt as a stock board.** Each company's
+  Company Value is drawn as candlesticks, one per round (open = last round's
+  close, then production / upgrades / undo / Apple's purchase move close,
+  high and low). Red = closed higher, blue = closed lower (Korean
+  convention), and chips sold are the volume bars. The server keeps the
+  candles (`room.valueCandles`), so a projector opened late still gets the
+  whole history.
+- **The screen is never empty.** Lobby shows a *Pre-market* view (huge room
+  code, join URL, companies listing as they join). Round 1, before any
+  candle has closed, shows an *Opening session* view (live price / quantity
+  / value per company, lock status, a price line for the session). From
+  the first close on, the candle board takes over.
+- **Whole UI redesigned** (player, host, projector) as a chip-fab trading
+  console: new `style.css`, wafer-map hero on both entry screens
+  (`js/wafer.js`), sticky session bar, 3-column trading layout.
+  Fonts and Chart.js are now served from `node_modules` (`/vendor/...`)
+  instead of Google Fonts / jsdelivr, so school networks that block CDNs
+  still work.
+- **In-game explanation screens removed.** The auto-opening "How to Play"
+  modal, the help button and the explanatory paragraphs are gone. Hover /
+  tap tooltips (ⓘ) stay. Long-form rules moved to the official guide site.
+- **Official guide site** in `official-site/` — a standalone page you can
+  deploy anywhere (Netlify, GitHub Pages). The game also serves it at
+  `/guide/`. If you deploy it on its own domain, set `GAME_URL` at the
+  bottom of `official-site/index.html` so its Play / Host buttons point to
+  the game.
+- **MSG Analyst** (`js/analyst.js`) — an assistant built into every screen
+  that runs 100% in the browser: no API key, no external AI. It ports the
+  engine's purchase algorithm, so "best price", "buy Tech?", "rivals" and
+  "brief me" are exact simulations on what your team can already see, plus
+  a rules knowledge base. Answers in English or Korean (it replies in
+  Korean if you type Hangul). The host gets a host-mode version (who hasn't
+  locked in, supply vs demand, settings, top contributors).
+- **Team name and member name are separate** when creating a team.
+  Duplicate member names on one team get a number appended.
+- **Contribution tracking.** Every action is attributed to the person who
+  took it (`member.stats`, `member.log` in `server.js`). Points: final price
+  3, final quantity 2, each kept upgrade 4 (undo removes it from the
+  buyer), Lock In 3, edits 0.1 (max 2/round), chat 0.5 team / 1 all-teams
+  (max 3/round). Visible to your own team (Contribution tab, per-round
+  breakdown on the results screen, MVP at game over) and to the host (live
+  panel + "Contribution report (CSV)"). Rival teams only see it after the
+  match ends. The activity feed now names the person, e.g.
+  "Silicon Tigers (Alex) upgraded Capacity to Lv1".
+- **Security fix:** game actions (`UPDATE_INPUT`, `TEAM_INVEST`,
+  `TEAM_UNDO_INVEST`, `LOCK_IN`) now require the socket to be seated on that
+  team; previously anyone who knew a `teamId` could act for it. Only the
+  host socket can post as HOST.
+- Player `STATE_SYNC` now includes `weights` (this round's effective scoring
+  weights) — not secret, and needed for the Analyst to match the server.
+  The projector receives `companyValue` per team (capital itself is still
+  never sent to it).
+
 ## Run it locally
 
 ```

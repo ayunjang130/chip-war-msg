@@ -23,6 +23,15 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
+// Third-party assets are served from node_modules instead of a CDN, so a
+// school network that blocks jsdelivr/Google Fonts still gets charts and type.
+app.use('/vendor/chart', express.static(path.join(__dirname, 'node_modules', 'chart.js', 'dist')));
+app.use('/vendor/fonts/archivo', express.static(path.join(__dirname, 'node_modules', '@fontsource-variable', 'archivo', 'files')));
+app.use('/vendor/fonts/plex', express.static(path.join(__dirname, 'node_modules', '@fontsource', 'ibm-plex-mono', 'files')));
+// The official guide site lives in its own folder so it can be deployed on
+// its own (Netlify, GitHub Pages, ...). It's also served here at /guide so
+// the in-game "Game guide" link works out of the box.
+app.use('/guide', express.static(path.join(__dirname, 'official-site')));
 app.get('/host', (req, res) => res.sendFile(path.join(__dirname, 'public', 'host.html')));
 app.get('/broadcast', (req, res) => res.sendFile(path.join(__dirname, 'public', 'broadcast.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -51,9 +60,70 @@ function genRoomCode() {
 // company's game state) ------------------------------------------------
 function addMember(team, socketId, memberName) {
   const memberId = genId('member');
-  const cleanName = (memberName || '').trim().slice(0, 24) || `Member ${team.members.length + 1}`;
-  team.members.push({ memberId, socketId, memberName: cleanName, connected: true });
+  let cleanName = (memberName || '').trim().slice(0, 24) || `Member ${team.members.length + 1}`;
+  // Two teammates can't share a display name - contribution tracking is
+  // shown by name, so "Alex" and "Alex" would be unreadable.
+  const taken = new Set(team.members.map((m) => m.memberName.toLowerCase()));
+  const base = cleanName;
+  let n = 1;
+  while (taken.has(cleanName.toLowerCase())) {
+    n += 1;
+    cleanName = `${base} ${n}`;
+  }
+  team.members.push({ memberId, socketId, memberName: cleanName, connected: true, joinedAt: Date.now(), stats: newContributionStats(), log: [], roundEditPts: 0, roundChatPts: 0 });
   return memberId;
+}
+
+// ---- Contribution tracking ------------------------------------------------
+// Every game-affecting action is attributed to the specific person who did
+// it, so a 4-person team can see (and a teacher can grade) who actually
+// drove each decision. Points are only awarded for DISCRETE decisions
+// (buying an upgrade, pressing Lock In, being the one whose price/quantity
+// was final) plus small, per-round-capped credit for activity (editing,
+// chatting) - so spamming the price box or the chat can't farm points.
+const CONTRIB_POINTS = Object.freeze({
+  finalPrice: 3, // your number was the one locked in
+  finalQty: 2,
+  upgrade: 4, // each Tech/Capacity purchase that wasn't undone
+  lockIn: 3,
+  editEach: 0.1, // per actual change to price/quantity...
+  editCapPerRound: 2, // ...capped per round
+  teamMsg: 0.5,
+  globalMsg: 1,
+  chatCapPerRound: 3
+});
+function newContributionStats() {
+  return { priceEdits: 0, qtyEdits: 0, finalPrice: 0, finalQty: 0, techBuys: 0, capBuys: 0, investSpent: 0, undos: 0, lockIns: 0, teamMsgs: 0, globalMsgs: 0, editPoints: 0, chatPoints: 0 };
+}
+function contributionBreakdown(stats) {
+  const s = stats || newContributionStats();
+  const pricing = s.finalPrice * CONTRIB_POINTS.finalPrice + s.finalQty * CONTRIB_POINTS.finalQty + s.editPoints;
+  const investment = (s.techBuys + s.capBuys) * CONTRIB_POINTS.upgrade;
+  const execution = s.lockIns * CONTRIB_POINTS.lockIn;
+  const communication = s.chatPoints;
+  const r = (x) => Math.round(x * 10) / 10;
+  return { total: r(pricing + investment + execution + communication), pricing: r(pricing), investment: r(investment), execution: r(execution), communication: r(communication) };
+}
+function logContribution(room, member, type, text) {
+  if (!member) return;
+  member.log = member.log || [];
+  member.log.push({ round: room.round, type, text, at: Date.now() });
+  if (member.log.length > 60) member.log.shift();
+}
+// Shape sent to clients: stats + breakdown + share-of-team percent. Only
+// ever sent to the member's own team, the host, and (at game over) everyone.
+function memberContribution(team, member) {
+  const mine = contributionBreakdown(member.stats);
+  const teamTotal = team.members.reduce((s, m) => s + contributionBreakdown(m.stats).total, 0);
+  return {
+    ...mine,
+    share: teamTotal > 0 ? Math.round((mine.total / teamTotal) * 100) : 0,
+    stats: { ...member.stats, investSpent: Math.round(member.stats.investSpent) },
+    recent: (member.log || []).slice(-10)
+  };
+}
+function contributionSnapshot(team) {
+  return team.members.map((m) => ({ memberName: m.memberName, connected: m.connected, ...memberContribution(team, m) }));
 }
 function findMember(team, memberId) {
   return team.members.find((m) => m.memberId === memberId);
@@ -104,8 +174,12 @@ function createTeamState(teamId, teamName, startingCapital, isBot = false, botSt
     // into levels the team already owned before this round began.
     roundStartTechLevel: 0,
     roundStartCapacityLevel: 0,
-    techPurchasesThisRound: [],
-    capacityPurchasesThisRound: []
+    techPurchasesThisRound: [], // [{cost, memberId}] - memberId so an undo un-credits the right person
+    capacityPurchasesThisRound: [],
+    // Who last changed price / quantity THIS round - whoever it is when the
+    // round resolves gets credit for "set the final number".
+    lastPriceEditor: null,
+    lastQtyEditor: null
   };
 }
 
@@ -130,6 +204,9 @@ function createRoom(hostSocketId) {
     shockHistory: [],
     lastResultsPayload: null,
     finalPayload: null,
+    // Company-value candles for the broadcast screen: teamId -> [{round, o,
+    // h, l, c, sold, revenue}]. round 0 is the "IPO" (starting budget).
+    valueCandles: {},
     // Read-only "broadcast" viewers (the classroom-projector screen) - never
     // tied to a team, never see anyone's capital. See SPECTATE_ROOM below.
     spectatorSocketIds: new Set(),
@@ -149,12 +226,17 @@ function createRoom(hostSocketId) {
 // ---- Hidden-information rules (GDD 2.10 / 2.11) --------------------------
 // Price, quantity, tech level and capacity level are always public.
 // Capital ("cash reserves") is only shown to the owning team and to the host.
-function publicTeam(team, viewerTeamId, isPrivileged, room) {
-  const showCapital = isPrivileged || team.teamId === viewerTeamId;
+function publicTeam(team, viewerTeamId, isPrivileged, room, opts) {
+  opts = opts || {};
+  const isOwn = team.teamId === viewerTeamId;
+  const showCapital = isPrivileged || isOwn;
   // isLeader is a boolean, never the raw memberId - memberId doubles as the
   // reconnection secret (see JOIN_ROOM), so it must never leave the server
   // for anyone but its own owning socket.
   const leader = getTeamLeader(team);
+  // Per-person contribution is team-internal: your own team and the host
+  // see it, rival teams only see names.
+  const showContribution = isPrivileged || isOwn;
   return {
     teamId: team.teamId,
     teamName: team.teamName,
@@ -162,7 +244,11 @@ function publicTeam(team, viewerTeamId, isPrivileged, room) {
     isBot: team.isBot,
     memberCount: team.members.length,
     maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM,
-    members: team.members.map((m) => ({ memberName: m.memberName, connected: m.connected, isLeader: !!leader && m === leader })),
+    members: team.members.map((m) => {
+      const base = { memberName: m.memberName, connected: m.connected, isLeader: !!leader && m === leader };
+      return showContribution ? { ...base, contribution: memberContribution(team, m) } : base;
+    }),
+    companyValue: isPrivileged || opts.includeValue ? Math.round(engine.calcCompanyValue(team)) : null,
     price: team.price,
     quantity: team.quantity,
     techLevel: team.techLevel,
@@ -200,6 +286,11 @@ function broadcastState(room) {
       maxPrice: engine.calcMaxPrice(room.marketPrice),
       demandPerTeam: effectiveDemandPerTeam,
       totalDemand,
+      roundTimerSeconds: room.config.roundTimerSeconds,
+      // This round's real scoring weights (config x shock x volatility).
+      // Not secret - it's what lets the in-browser analyst run the exact
+      // same purchase simulation the server will run.
+      weights: roomWeights(room),
       shock: publicShock(room.activeShock, false),
       preview: preview[team.teamId] || null,
       teams: teamList.map((t) => publicTeam(t, team.teamId, false, room))
@@ -223,7 +314,9 @@ function broadcastState(room) {
       maxPrice: engine.calcMaxPrice(room.marketPrice),
       demandPerTeam: effectiveDemandPerTeam,
       totalDemand,
+      weights: roomWeights(room),
       shock: publicShock(room.activeShock, true),
+      candles: room.valueCandles,
       teams: teamList.map((t) => publicTeam(t, null, true, room))
     });
   }
@@ -244,8 +337,15 @@ function broadcastState(room) {
       marketPrice: room.marketPrice,
       demandPerTeam: effectiveDemandPerTeam,
       totalDemand,
+      roomCode: room.code,
+      startingCapital: room.config.startingCapital,
       shock: publicShock(room.activeShock, false),
-      teams: teamList.map((t) => publicTeam(t, null, false, room))
+      // Company value is shown on the projector on purpose (it's the
+      // headline number of the whole game). Capital itself is still never
+      // sent here - and was already reconstructable from public info
+      // (starting budget + public revenue - public upgrade costs).
+      candles: room.valueCandles,
+      teams: teamList.map((t) => publicTeam(t, null, false, room, { includeValue: true }))
     };
     room.spectatorSocketIds.forEach((sid) => io.to(sid).emit('STATE_SYNC', spectatorPayload));
   }
@@ -403,12 +503,45 @@ async function decideRoundShock(room) {
   return engine.pickProceduralShock(recentTitles);
 }
 
+// ---- Company-value candles (broadcast screen) ---------------------------
+// One candle per team per round, like a daily candle on a stock chart:
+// open = value when the round opened (= last round's close), then every
+// value-changing event (production, upgrade, undo, Apple's purchase) moves
+// close/high/low. Red body = closed higher than it opened, blue = lower.
+function teamValue(team) {
+  return Math.round(engine.calcCompanyValue(team));
+}
+function initIpoCandles(room) {
+  room.valueCandles = {};
+  Object.values(room.teams).forEach((t) => {
+    const v = teamValue(t);
+    room.valueCandles[t.teamId] = [{ round: 0, o: v, h: v, l: v, c: v, sold: 0, revenue: 0 }];
+  });
+}
+function openCandle(room, team) {
+  const list = (room.valueCandles[team.teamId] = room.valueCandles[team.teamId] || []);
+  const prev = list[list.length - 1];
+  const o = prev ? prev.c : teamValue(team);
+  list.push({ round: room.round, o, h: o, l: o, c: o, sold: 0, revenue: 0 });
+}
+function touchCandle(room, team) {
+  const list = room.valueCandles[team.teamId];
+  if (!list || !list.length) return;
+  const c = list[list.length - 1];
+  if (c.round !== room.round) return;
+  const v = teamValue(team);
+  c.c = v;
+  c.h = Math.max(c.h, v);
+  c.l = Math.min(c.l, v);
+}
+
 // ---- Round lifecycle -------------------------------------------------------
 
 async function startRound(room) {
   if (room.timerHandle) clearInterval(room.timerHandle);
   if (room.nextRoundHandle) clearTimeout(room.nextRoundHandle);
 
+  if (room.round === 0) initIpoCandles(room);
   room.round += 1;
   room.phase = 'round_active'; // set synchronously, before any `await`, so a
   // second trigger (e.g. a host double-click) can't re-enter this function
@@ -433,8 +566,15 @@ async function startRound(room) {
   // (e.g. Supply Chain Crisis) scales the per-level bonus right here.
   const capMultiplier = roomCapacityProdMultiplier(room);
   Object.values(room.teams).forEach((team) => {
+    openCandle(room, team);
     const production = engine.calcProduction(team.capacityLevel, capMultiplier);
     team.inventory += production;
+    team.lastPriceEditor = null;
+    team.lastQtyEditor = null;
+    team.members.forEach((m) => {
+      m.roundEditPts = 0;
+      m.roundChatPts = 0;
+    });
     team.locked = false;
     // Fresh snapshot + ledger for this round's undo support - last round's
     // purchases are already permanent, only THIS round's are reversible.
@@ -448,6 +588,7 @@ async function startRound(room) {
     // nothing is still a real (if aggressive) strategy, not an accident.
     team.quantity = team.inventory;
     if (!team.price) team.price = room.marketPrice > 0 ? room.marketPrice : 50;
+    touchCandle(room, team); // production lands inside this round's candle
   });
 
   room.timeLeft = room.config.roundTimerSeconds;
@@ -505,6 +646,7 @@ function botAct(room, team) {
         team.capital -= cost;
         budget -= cost;
         bought = true;
+        touchCandle(room, team);
         postActivity(room, team, kind === 'tech' ? 'tech_up' : 'capacity_up', `upgraded ${kind === 'tech' ? 'Tech' : 'Capacity'} to Lv${kind === 'tech' ? team.techLevel : team.capacityLevel}`);
         break;
       }
@@ -560,6 +702,22 @@ function resolveRound(room) {
     team.price = Math.min(team.price, engine.calcMaxPrice(room.marketPrice));
   });
 
+  // Contribution: whoever last touched price / quantity this round owns
+  // the number that actually went to Apple.
+  Object.values(room.teams).forEach((team) => {
+    if (team.isBot) return;
+    const pm = team.lastPriceEditor && findMember(team, team.lastPriceEditor);
+    if (pm) {
+      pm.stats.finalPrice += 1;
+      logContribution(room, pm, 'final_price', `Set the final price ($${team.price})`);
+    }
+    const qm = team.lastQtyEditor && findMember(team, team.lastQtyEditor);
+    if (qm) {
+      qm.stats.finalQty += 1;
+      logContribution(room, qm, 'final_qty', `Set the final quantity (${Math.max(0, Math.min(team.quantity, team.inventory))} units)`);
+    }
+  });
+
   const entries = Object.values(room.teams).map((t) => ({
     teamId: t.teamId,
     price: t.price,
@@ -582,6 +740,12 @@ function resolveRound(room) {
       team.inventory -= r.purchased;
       team.capital += r.revenue;
       team.lastRoundPrice = r.price;
+      touchCandle(room, team);
+      const candle = (room.valueCandles[team.teamId] || []).slice(-1)[0];
+      if (candle && candle.round === room.round) {
+        candle.sold = r.purchased;
+        candle.revenue = Math.round(r.revenue);
+      }
       return {
         teamId: team.teamId,
         teamName: team.teamName,
@@ -593,6 +757,7 @@ function resolveRound(room) {
         capital: Math.round(team.capital),
         techLevel: team.techLevel,
         capacityLevel: team.capacityLevel,
+        companyValue: teamValue(team),
         competitiveScore: Math.round(r.CS * 10) / 10
       };
     })
@@ -633,10 +798,14 @@ function endGame(room) {
       inventory: t.inventory,
       techLevel: t.techLevel,
       capacityLevel: t.capacityLevel,
-      companyValue: Math.round(engine.calcCompanyValue(t))
+      companyValue: Math.round(engine.calcCompanyValue(t)),
+      isBot: t.isBot,
+      // Revealed to everyone once the match is over - the end-of-game
+      // "who carried" moment. Never sent to rival teams mid-match.
+      contributions: t.isBot ? [] : contributionSnapshot(t)
     }))
     .sort((a, b) => b.companyValue - a.companyValue);
-  const payload = { leaderboard: teams, winner: teams[0] || null, history: room.history };
+  const payload = { leaderboard: teams, winner: teams[0] || null, history: room.history, candles: room.valueCandles };
   room.finalPayload = payload;
   io.to(room.code).emit('GAME_OVER', payload);
 }
@@ -656,7 +825,16 @@ function resetRoom(room) {
   room.lastResultsPayload = null;
   room.finalPayload = null;
   room.globalChatLog = [];
+  room.valueCandles = {};
   Object.values(room.teams).forEach((t) => {
+    t.members.forEach((m) => {
+      m.stats = newContributionStats();
+      m.log = [];
+    });
+    t.lastPriceEditor = null;
+    t.lastQtyEditor = null;
+    t.techPurchasesThisRound = [];
+    t.capacityPurchasesThisRound = [];
     t.capital = room.config.startingCapital;
     t.inventory = engine.CONFIG.INITIAL_INVENTORY;
     t.techLevel = engine.CONFIG.INITIAL_TECH;
@@ -686,15 +864,16 @@ function resetRoom(room) {
 // Activity/"kill feed" entries (kind: 'system') are auto-posted into the
 // SAME global channel by postActivity() below, so every team can see what
 // every other team just did without anyone having to type it out.
-function postGlobalMessage(room, { name, text, kind, actionType, teamId }) {
-  const msg = { id: genId('msg'), channel: 'global', kind: kind || 'chat', name, text, actionType: actionType || null, teamId: teamId || null, at: Date.now() };
+function postGlobalMessage(room, { name, text, kind, actionType, teamId, actor }) {
+  const msg = { id: genId('msg'), channel: 'global', kind: kind || 'chat', name, text, actionType: actionType || null, teamId: teamId || null, actor: actor || null, round: room.round, at: Date.now() };
   room.globalChatLog.push(msg);
   if (room.globalChatLog.length > 200) room.globalChatLog.shift();
   io.to(room.code).emit('CHAT_MESSAGE', msg);
   return msg;
 }
-function postActivity(room, team, actionType, text) {
-  postGlobalMessage(room, { name: team.teamName, text, kind: 'system', actionType, teamId: team.teamId });
+function postActivity(room, team, actionType, text, member) {
+  const msg = postGlobalMessage(room, { name: team.teamName, text, kind: 'system', actionType, teamId: team.teamId, actor: member && team.members.length > 1 ? member.memberName : null });
+  return msg;
 }
 function sendChatSync(socketId, room, team) {
   io.to(socketId).emit('CHAT_SYNC', { team: team ? team.chatLog || [] : [], global: room.globalChatLog || [] });
@@ -738,7 +917,7 @@ io.on('connection', (socket) => {
         phase: room.phase,
         teams: Object.values(room.teams)
           .filter((t) => !t.isBot)
-          .map((t) => ({ teamId: t.teamId, teamName: t.teamName, memberCount: t.members.length, maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM }))
+          .map((t) => ({ teamId: t.teamId, teamName: t.teamName, memberCount: t.members.length, maxMembers: engine.CONFIG.MAX_MEMBERS_PER_TEAM, memberNames: t.members.map((m) => m.memberName) }))
       });
   });
 
@@ -754,6 +933,7 @@ io.on('connection', (socket) => {
     room.spectatorSocketIds.add(socket.id);
     cb && cb({ ok: true, roomCode: room.code });
     broadcastState(room);
+    sendChatSync(socket.id, room, null); // activity feed backlog for a late-opened projector
     if (room.phase === 'round_results' && room.lastResultsPayload) {
       io.to(socket.id).emit('ROUND_RESULT', room.lastResultsPayload);
     } else if (room.phase === 'game_over' && room.finalPayload) {
@@ -768,7 +948,8 @@ io.on('connection', (socket) => {
     function finishJoin(team, mId) {
       socket.join(roomCode);
       socketMeta[socket.id] = { roomCode, teamId: team.teamId, memberId: mId, role: 'player' };
-      cb && cb({ ok: true, teamId: team.teamId, memberId: mId, roomCode });
+      const seat = findMember(team, mId);
+      cb && cb({ ok: true, teamId: team.teamId, memberId: mId, memberName: seat ? seat.memberName : null, roomCode });
       broadcastLobby(room);
       broadcastState(room);
       sendChatSync(socket.id, room, team);
@@ -831,9 +1012,9 @@ io.on('connection', (socket) => {
     }
     const team = createTeamState(id, candidate, room.config.startingCapital);
     room.teams[id] = team;
-    // The join screen only asks the creator for ONE name (the team's), so
-    // default their own roster entry to match it unless they separately
-    // gave a personal name.
+    // Team name and the creator's own name are separate fields on the
+    // create form. The team name is only a fallback for older clients that
+    // don't send memberName.
     const newMemberId = addMember(team, socket.id, memberName || candidate);
     finishJoin(team, newMemberId);
   });
@@ -861,6 +1042,13 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
+  // Every team action is attributed to the person (socket) who sent it.
+  // It also doubles as an auth check: a socket that isn't seated on this
+  // team can no longer act for it just by knowing its teamId.
+  function actingMember(team) {
+    return findMemberBySocket(team, socket.id) || null;
+  }
+
   // Live typed price/quantity - broadcast immediately so opponents can see
   // (and be bluffed by) it, per the "Real-time visible bluffing" pillar.
   socket.on('UPDATE_INPUT', ({ roomCode, teamId, price, quantity }) => {
@@ -868,16 +1056,40 @@ io.on('connection', (socket) => {
     if (!room) return;
     const team = room.teams[teamId];
     if (!team || team.locked || room.phase !== 'round_active') return;
+    const member = actingMember(team);
+    if (!member) return;
+    let changed = false;
     if (price != null) {
       const p = Number(price);
       // Anti-exploit price ceiling: see engine.calcMaxPrice. Clamped here
       // (not just validated) so a submitted value can never exceed it,
       // even from a modified client.
-      if (!Number.isNaN(p)) team.price = Math.max(0, Math.min(p, engine.calcMaxPrice(room.marketPrice)));
+      if (!Number.isNaN(p)) {
+        const next = Math.max(0, Math.min(p, engine.calcMaxPrice(room.marketPrice)));
+        if (next !== team.price) {
+          team.price = next;
+          team.lastPriceEditor = member.memberId;
+          member.stats.priceEdits += 1;
+          changed = true;
+        }
+      }
     }
     if (quantity != null) {
       const q = Number(quantity);
-      if (!Number.isNaN(q)) team.quantity = Math.max(0, Math.min(Math.round(q), team.inventory));
+      if (!Number.isNaN(q)) {
+        const next = Math.max(0, Math.min(Math.round(q), team.inventory));
+        if (next !== team.quantity) {
+          team.quantity = next;
+          team.lastQtyEditor = member.memberId;
+          member.stats.qtyEdits += 1;
+          changed = true;
+        }
+      }
+    }
+    if (changed && member.roundEditPts < CONTRIB_POINTS.editCapPerRound) {
+      const add = Math.min(CONTRIB_POINTS.editEach, CONTRIB_POINTS.editCapPerRound - member.roundEditPts);
+      member.roundEditPts += add;
+      member.stats.editPoints = Math.round((member.stats.editPoints + add) * 100) / 100;
     }
     broadcastState(room);
   });
@@ -887,6 +1099,8 @@ io.on('connection', (socket) => {
     if (!room) return;
     const team = room.teams[teamId];
     if (!team || team.locked || room.phase !== 'round_active') return;
+    const member = actingMember(team);
+    if (!member) return;
     // Debt & Comeback Handling: negative capital from aggressive investment
     // is explicitly allowed, so the only gate here is the level cap.
     if (kind === 'tech' && team.techLevel < engine.CONFIG.TECH_MAX) {
@@ -894,16 +1108,25 @@ io.on('connection', (socket) => {
       team.techLevel += 1;
       team.capital -= cost;
       team.techPurchasesThisRound = team.techPurchasesThisRound || [];
-      team.techPurchasesThisRound.push(cost);
-      postActivity(room, team, 'tech_up', `upgraded Tech to Lv${team.techLevel}`);
+      team.techPurchasesThisRound.push({ cost, memberId: member.memberId });
+      member.stats.techBuys += 1;
+      member.stats.investSpent += cost;
+      logContribution(room, member, 'tech_up', `Bought Tech Lv${team.techLevel} ($${cost.toLocaleString()})`);
+      postActivity(room, team, 'tech_up', `upgraded Tech to Lv${team.techLevel}`, member);
     } else if (kind === 'capacity' && team.capacityLevel < engine.CONFIG.CAPACITY_MAX) {
       const cost = roomUpgradeCost(room, 'capacity', team.capacityLevel);
       team.capacityLevel += 1;
       team.capital -= cost;
       team.capacityPurchasesThisRound = team.capacityPurchasesThisRound || [];
-      team.capacityPurchasesThisRound.push(cost);
-      postActivity(room, team, 'capacity_up', `upgraded Capacity to Lv${team.capacityLevel}`);
+      team.capacityPurchasesThisRound.push({ cost, memberId: member.memberId });
+      member.stats.capBuys += 1;
+      member.stats.investSpent += cost;
+      logContribution(room, member, 'capacity_up', `Bought Capacity Lv${team.capacityLevel} ($${cost.toLocaleString()})`);
+      postActivity(room, team, 'capacity_up', `upgraded Capacity to Lv${team.capacityLevel}`, member);
+    } else {
+      return;
     }
+    touchCandle(room, team);
     broadcastState(room);
   });
 
@@ -916,15 +1139,28 @@ io.on('connection', (socket) => {
     if (!room) return;
     const team = room.teams[teamId];
     if (!team || team.locked || room.phase !== 'round_active') return;
+    const member = actingMember(team);
+    if (!member) return;
     const ledger = kind === 'tech' ? team.techPurchasesThisRound : team.capacityPurchasesThisRound;
     const roundStartLevel = kind === 'tech' ? team.roundStartTechLevel : team.roundStartCapacityLevel;
     const currentLevel = kind === 'tech' ? team.techLevel : team.capacityLevel;
     if (!ledger || ledger.length === 0 || currentLevel <= roundStartLevel) return;
-    const refund = ledger.pop();
+    const entry = ledger.pop();
+    const refund = typeof entry === 'number' ? entry : entry.cost;
     team.capital += refund;
     if (kind === 'tech') team.techLevel -= 1;
     else team.capacityLevel -= 1;
-    postActivity(room, team, kind === 'tech' ? 'tech_down' : 'capacity_down', `undid a ${kind === 'tech' ? 'Tech' : 'Capacity'} upgrade (back to Lv${kind === 'tech' ? team.techLevel : team.capacityLevel})`);
+    // The purchase no longer counts for whoever made it.
+    const buyer = entry && entry.memberId ? findMember(team, entry.memberId) : null;
+    if (buyer) {
+      if (kind === 'tech') buyer.stats.techBuys = Math.max(0, buyer.stats.techBuys - 1);
+      else buyer.stats.capBuys = Math.max(0, buyer.stats.capBuys - 1);
+      buyer.stats.investSpent = Math.max(0, buyer.stats.investSpent - refund);
+    }
+    member.stats.undos += 1;
+    logContribution(room, member, 'undo', `Undid a ${kind === 'tech' ? 'Tech' : 'Capacity'} upgrade`);
+    touchCandle(room, team);
+    postActivity(room, team, kind === 'tech' ? 'tech_down' : 'capacity_down', `undid a ${kind === 'tech' ? 'Tech' : 'Capacity'} upgrade (back to Lv${kind === 'tech' ? team.techLevel : team.capacityLevel})`, member);
     broadcastState(room);
   });
 
@@ -933,12 +1169,26 @@ io.on('connection', (socket) => {
     if (!room) return;
     const team = room.teams[teamId];
     if (!team || team.locked || room.phase !== 'round_active') return;
+    const member = actingMember(team);
+    if (!member) return;
     team.locked = true;
     team.lockOrder = ++room.lockCounter;
-    postActivity(room, team, 'lock', `locked in — $${team.price} × ${team.quantity} units`);
+    member.stats.lockIns += 1;
+    logContribution(room, member, 'lock', `Locked in R${room.round}: $${team.price} × ${team.quantity}`);
+    postActivity(room, team, 'lock', `locked in — $${team.price} × ${team.quantity} units`, member);
     broadcastState(room);
     maybeEarlyResolve(room);
   });
+
+  function creditChat(room, member, channel) {
+    if (channel === 'team') member.stats.teamMsgs += 1;
+    else member.stats.globalMsgs += 1;
+    if (room.phase !== 'round_active') return; // lobby small talk doesn't count
+    const value = channel === 'team' ? CONTRIB_POINTS.teamMsg : CONTRIB_POINTS.globalMsg;
+    const add = Math.min(value, Math.max(0, CONTRIB_POINTS.chatCapPerRound - member.roundChatPts));
+    member.roundChatPts += add;
+    member.stats.chatPoints = Math.round((member.stats.chatPoints + add) * 100) / 100;
+  }
 
   socket.on('CHAT_MESSAGE', ({ roomCode, teamId, channel, text }) => {
     const room = rooms[roomCode];
@@ -955,11 +1205,11 @@ io.on('connection', (socket) => {
       if (!sender) return; // only real teams have a private channel (not HOST)
       const member = findMemberBySocket(sender, socket.id);
       if (!member) return; // must actually be on this team to post here
-      const name = sender.teamName + (sender.members.length > 1 ? ` (${member.memberName})` : '');
-      const msg = { id: genId('msg'), channel: 'team', kind: 'chat', name, text: trimmed, at: Date.now() };
+      const msg = { id: genId('msg'), channel: 'team', kind: 'chat', name: member.memberName, team: sender.teamName, text: trimmed, at: Date.now() };
       sender.chatLog = sender.chatLog || [];
       sender.chatLog.push(msg);
       if (sender.chatLog.length > 150) sender.chatLog.shift();
+      creditChat(room, member, 'team');
       sender.members.forEach((m) => {
         if (m.socketId && m.connected) io.to(m.socketId).emit('CHAT_MESSAGE', msg);
       });
@@ -970,15 +1220,20 @@ io.on('connection', (socket) => {
     // be their team's CURRENT leader to post - everyone on every team can
     // still read it, per the "leader negotiates, team watches" design. ----
     let name = 'HOST';
+    let actor = null;
     if (sender) {
       const member = findMemberBySocket(sender, socket.id);
       if (!member || !isTeamLeader(sender, member.memberId)) {
         io.to(socket.id).emit('CHAT_BLOCKED', { reason: 'Only your team leader can post in the All Teams channel.' });
         return;
       }
-      name = sender.teamName + (sender.members.length > 1 ? ` (${member.memberName})` : '');
+      name = sender.teamName;
+      actor = sender.members.length > 1 ? member.memberName : null;
+      creditChat(room, member, 'global');
+    } else if (socket.id !== room.hostSocketId) {
+      return; // only the host may post without a team
     }
-    postGlobalMessage(room, { name, text: trimmed, kind: 'chat' });
+    postGlobalMessage(room, { name, text: trimmed, kind: 'chat', teamId: sender ? sender.teamId : null, actor });
   });
 
   socket.on('HOST_UPDATE_CONFIG', ({ roomCode, config }) => {
@@ -1048,6 +1303,7 @@ io.on('connection', (socket) => {
       });
     }
     delete room.teams[teamId];
+    if (room.valueCandles) delete room.valueCandles[teamId];
     broadcastLobby(room);
     broadcastState(room);
   });
